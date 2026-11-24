@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "T1Controller", "T1Controller\T1Controller.csproj", "{8EFCA514-C3C7-4796-9C80-A48F431E71CD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "T1Controller.Tests", "T1Controller.Tests\T1Controller.Tests.csproj", "{1E97E68E-3E51-4609-ACDB-478B17C3F5BF}"
+EndProject
+Global
+    GlobalSection(SolutionConfigurationPlatforms) = preSolution
+        Debug|Any CPU = Debug|Any CPU
+        Release|Any CPU = Release|Any CPU
+    EndGlobalSection
+    GlobalSection(ProjectConfigurationPlatforms) = postSolution
+        {8EFCA514-C3C7-4796-9C80-A48F431E71CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {8EFCA514-C3C7-4796-9C80-A48F431E71CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {8EFCA514-C3C7-4796-9C80-A48F431E71CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {8EFCA514-C3C7-4796-9C80-A48F431E71CD}.Release|Any CPU.Build.0 = Release|Any CPU
+        {1E97E68E-3E51-4609-ACDB-478B17C3F5BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {1E97E68E-3E51-4609-ACDB-478B17C3F5BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {1E97E68E-3E51-4609-ACDB-478B17C3F5BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {1E97E68E-3E51-4609-ACDB-478B17C3F5BF}.Release|Any CPU.Build.0 = Release|Any CPU
+    EndGlobalSection
+EndGlobal

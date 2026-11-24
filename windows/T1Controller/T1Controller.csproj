@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Orvio</AssemblyName>
+    <RootNamespace>T1Controller</RootNamespace>
+    <Product>Orvio</Product>
+    <Title>Orvio</Title>
+    <Description>Remote buttons, music control and dual-host switching.</Description>
+    <PackageLicenseExpression>PolyForm-Noncommercial-1.0.0</PackageLicenseExpression>
+    <Version>0.3.1</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/._*;**/.DS_Store</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <Resource Include="../../macos/Resources/T1Mark.png" Link="T1Mark.png" />
+    <Resource Include="../../shared/remote-models.json.gz" Link="RemoteModels.json.gz" />
+    <Content Include="../../tools/xiaoai_daily.py" Link="XiaoAIBridge/xiaoai_daily.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../tools/bemfa_probe.py" Link="XiaoAIBridge/bemfa_probe.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

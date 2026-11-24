@@ -1,0 +1,26 @@
+<Window x:Class="T1Controller.SetupGuide"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="首次设置" Width="610" SizeToContent="Height" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" ShowInTaskbar="False" Background="#262B36"
+        FontFamily="Segoe UI, Microsoft YaHei UI" Activated="RefreshStatus">
+    <StackPanel Margin="24">
+        <TextBlock Text="设置引导" FontSize="25" FontWeight="SemiBold" Foreground="#F2F4FA"/>
+        <TextBlock Text="连接遥控器，再按需要设置语音功能。" Margin="0,6,0,18" Foreground="{StaticResource MutedBrush}"/>
+        <Border Background="#4C566883" BorderBrush="#547286A2" BorderThickness="1" CornerRadius="12" Padding="18">
+            <StackPanel>
+                <TextBlock x:Name="StepTitle" FontWeight="SemiBold" FontSize="17" Foreground="#F2F4FA"/>
+                <TextBlock x:Name="StepDetail" TextWrapping="Wrap" Foreground="#DCE2F0" Margin="0,9,0,10"/>
+                <TextBlock x:Name="StepState" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10"/>
+                <Button x:Name="OpenSettings" Click="OpenSettingsPage" HorizontalAlignment="Left"/>
+            </StackPanel>
+        </Border>
+        <Grid Margin="0,16,0,0">
+            <Button Content="稍后" HorizontalAlignment="Left" IsCancel="True"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="BackButton" Content="上一步" Click="Back"/>
+                <Button x:Name="NextButton" Content="下一步" IsDefault="True" Click="Next"/>
+            </StackPanel>
+        </Grid>
+    </StackPanel>
+</Window>

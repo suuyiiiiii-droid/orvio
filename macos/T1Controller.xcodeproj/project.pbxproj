@@ -1,0 +1,251 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {};
+    objectVersion = 56;
+    objects = {
+
+/* Begin PBXBuildFile section */
+        D10000000000000000000001 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000006 /* Preferences.swift */; };
+        D10000000000000000000002 /* ControllerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000007 /* ControllerModel.swift */; };
+        D10000000000000000000003 /* T1ControllerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000008 /* T1ControllerApp.swift */; };
+        D10000000000000000000004 /* T1Core in Frameworks */ = {isa = PBXBuildFile; productRef = D1000000000000000000001A /* T1Core */; };
+        D10000000000000000000005 /* T1Platform in Frameworks */ = {isa = PBXBuildFile; productRef = D1000000000000000000001B /* T1Platform */; };
+        D10000000000000000000020 /* T1Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000026; };
+        D10000000000000000000021 /* DeviceStudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000027; };
+        D10000000000000000000022 /* RemoteKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000028; };
+        D10000000000000000000023 /* RemoteScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000029; };
+        D10000000000000000000024 /* T1Mark.icns in Resources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000002A; };
+        D1000000000000000000002B /* PermissionGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000002C; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+        D10000000000000000000006 /* Preferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferences.swift; sourceTree = "<group>"; };
+        D10000000000000000000007 /* ControllerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerModel.swift; sourceTree = "<group>"; };
+        D10000000000000000000008 /* T1ControllerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T1ControllerApp.swift; sourceTree = "<group>"; };
+        D10000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+        D1000000000000000000000A /* Orvio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orvio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        D10000000000000000000026 /* T1Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T1Design.swift; sourceTree = "<group>"; };
+        D10000000000000000000027 /* DeviceStudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStudio.swift; sourceTree = "<group>"; };
+        D10000000000000000000028 /* RemoteKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKey.swift; sourceTree = "<group>"; };
+        D10000000000000000000029 /* RemoteScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteScene.swift; sourceTree = "<group>"; };
+        D1000000000000000000002A /* T1Mark.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = T1Mark.icns; path = Resources/T1Mark.icns; sourceTree = "<group>"; };
+        D1000000000000000000002C /* PermissionGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGuide.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+        D1000000000000000000000B /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                D10000000000000000000004 /* T1Core in Frameworks */,
+                D10000000000000000000005 /* T1Platform in Frameworks */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+        D1000000000000000000000C = {
+            isa = PBXGroup;
+            children = (
+                D1000000000000000000000D /* T1Controller */,
+                D10000000000000000000009 /* Info.plist */,
+                D1000000000000000000002A /* T1Mark.icns */,
+                D1000000000000000000000E /* Products */,
+            );
+            sourceTree = "<group>";
+        };
+        D1000000000000000000000D /* T1Controller */ = {
+            isa = PBXGroup;
+            children = (
+                D10000000000000000000006 /* Preferences.swift */,
+                D10000000000000000000007 /* ControllerModel.swift */,
+                D10000000000000000000008 /* T1ControllerApp.swift */,
+                D10000000000000000000026 /* T1Design.swift */,
+                D10000000000000000000027 /* DeviceStudio.swift */,
+                D10000000000000000000028 /* RemoteKey.swift */,
+                D10000000000000000000029 /* RemoteScene.swift */,
+                D1000000000000000000002C /* PermissionGuide.swift */,
+            );
+            name = T1Controller;
+            path = Sources/T1Controller;
+            sourceTree = "<group>";
+        };
+        D1000000000000000000000E /* Products */ = {
+            isa = PBXGroup;
+            children = (D1000000000000000000000A /* Orvio.app */);
+            name = Products;
+            sourceTree = "<group>";
+        };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+        D1000000000000000000000F /* T1Controller */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = D10000000000000000000013 /* App build configurations */;
+            buildPhases = (
+                D10000000000000000000011 /* Sources */,
+                D1000000000000000000000B /* Frameworks */,
+                D10000000000000000000025 /* Resources */,
+            );
+            buildRules = ();
+            dependencies = ();
+            name = T1Controller;
+            packageProductDependencies = (
+                D1000000000000000000001A /* T1Core */,
+                D1000000000000000000001B /* T1Platform */,
+            );
+            productName = Orvio;
+            productReference = D1000000000000000000000A /* Orvio.app */;
+            productType = "com.apple.product-type.application";
+        };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+        D10000000000000000000010 /* Project object */ = {
+            isa = PBXProject;
+            attributes = {
+                LastSwiftUpdateCheck = 1620;
+                LastUpgradeCheck = 1620;
+            };
+            buildConfigurationList = D10000000000000000000012 /* Project build configurations */;
+            compatibilityVersion = "Xcode 14.0";
+            developmentRegion = "zh-Hans";
+            hasScannedForEncodings = 0;
+            knownRegions = ("zh-Hans", Base);
+            mainGroup = D1000000000000000000000C;
+            packageReferences = (D10000000000000000000019 /* Local Swift package */);
+            productRefGroup = D1000000000000000000000E /* Products */;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (D1000000000000000000000F /* T1Controller */);
+        };
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+        D10000000000000000000011 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                D10000000000000000000001 /* Preferences.swift in Sources */,
+                D10000000000000000000002 /* ControllerModel.swift in Sources */,
+                D10000000000000000000003 /* T1ControllerApp.swift in Sources */,
+                D10000000000000000000020 /* T1Design.swift in Sources */,
+                D10000000000000000000021 /* DeviceStudio.swift in Sources */,
+                D10000000000000000000022 /* RemoteKey.swift in Sources */,
+                D10000000000000000000023 /* RemoteScene.swift in Sources */,
+                D1000000000000000000002B /* PermissionGuide.swift in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXResourcesBuildPhase section */
+        D10000000000000000000025 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (D10000000000000000000024 /* T1Mark.icns in Resources */);
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+        D10000000000000000000014 /* Project Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                ONLY_ACTIVE_ARCH = YES;
+                SDKROOT = macosx;
+                SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+                SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+                SWIFT_VERSION = 5.0;
+            };
+            name = Debug;
+        };
+        D10000000000000000000015 /* Project Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                SDKROOT = macosx;
+                SWIFT_COMPILATION_MODE = wholemodule;
+                SWIFT_OPTIMIZATION_LEVEL = "-O";
+                SWIFT_VERSION = 5.0;
+            };
+            name = Release;
+        };
+        D10000000000000000000016 /* App Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                CODE_SIGN_IDENTITY = "-";
+                CODE_SIGN_STYLE = Manual;
+                CURRENT_PROJECT_VERSION = 22;
+                GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = Info.plist;
+                MARKETING_VERSION = 0.3.0;
+                PRODUCT_BUNDLE_IDENTIFIER = local.t1controller.app;
+                PRODUCT_NAME = Orvio;
+            };
+            name = Debug;
+        };
+        D10000000000000000000017 /* App Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                CODE_SIGN_IDENTITY = "-";
+                CODE_SIGN_STYLE = Manual;
+                CURRENT_PROJECT_VERSION = 22;
+                GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = Info.plist;
+                MARKETING_VERSION = 0.3.0;
+                PRODUCT_BUNDLE_IDENTIFIER = local.t1controller.app;
+                PRODUCT_NAME = Orvio;
+            };
+            name = Release;
+        };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+        D10000000000000000000012 /* Project build configurations */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                D10000000000000000000014 /* Project Debug */,
+                D10000000000000000000015 /* Project Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        D10000000000000000000013 /* App build configurations */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                D10000000000000000000016 /* App Debug */,
+                D10000000000000000000017 /* App Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+        D10000000000000000000019 /* Local Swift package */ = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = ".";
+        };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+        D1000000000000000000001A /* T1Core */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = D10000000000000000000019 /* Local Swift package */;
+            productName = T1Core;
+        };
+        D1000000000000000000001B /* T1Platform */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = D10000000000000000000019 /* Local Swift package */;
+            productName = T1Platform;
+        };
+/* End XCSwiftPackageProductDependency section */
+    };
+    rootObject = D10000000000000000000010 /* Project object */;
+}

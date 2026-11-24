@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "T1 action v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action"],
+  "properties": {
+    "action": {
+      "enum": ["play", "pause", "togglePlayback", "previousTrack", "nextTrack", "volumeUp", "volumeDown", "setVolume", "toggleMute", "nextPlayer", "openPlayer", "switchHost", "switchOtherHost", "playDailyRecommendations"]
+    },
+    "percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "host": { "enum": ["mac", "windows"] },
+    "displayOnly": { "type": "boolean" },
+    "player": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "setVolume" } } },
+      "then": { "required": ["percent"] },
+      "else": { "not": { "required": ["percent"] } }
+    },
+    {
+      "if": { "properties": { "action": { "const": "switchHost" } } },
+      "then": { "required": ["host"] },
+      "else": { "not": { "anyOf": [{ "required": ["host"] }, { "required": ["displayOnly"] }] } }
+    },
+    {
+      "if": { "properties": { "action": { "const": "openPlayer" } } },
+      "then": { "required": ["player"] },
+      "else": { "not": { "required": ["player"] } }
+    }
+  ]
+}

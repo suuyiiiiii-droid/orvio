@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/._*;**/.DS_Store</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
+    <Compile Include="../T1Controller/Settings.cs" Link="Settings.cs" />
+    <Compile Include="../T1Controller/Gestures.cs" Link="Gestures.cs" />
+    <Compile Include="../T1Controller/IntentParser.cs" Link="IntentParser.cs" />
+    <Compile Include="../T1Controller/MusicLayout.cs" Link="MusicLayout.cs" />
+    <Compile Include="../T1Controller/MonitorIdentity.cs" Link="MonitorIdentity.cs" />
+    <None Include="../../shared/intent-fixtures.json" Link="intent-fixtures.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
