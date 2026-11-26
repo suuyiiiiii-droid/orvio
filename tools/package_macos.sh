@@ -51,6 +51,8 @@ contents="$app/Contents"
 bridge="$contents/Resources/XiaoAIBridge"
 mkdir -p "$contents/MacOS" "$bridge/paho/mqtt" "$bridge/paho_mqtt-2.1.0.dist-info/licenses" \
     "$staging/cache" "$staging/config" "$staging/security" "$staging/modules"
+mkdir -p "$contents/Resources/Licenses"
+install -m 644 "$repo_dir/licenses/mi-ao-MIT.txt" "$contents/Resources/Licenses/"
 install -m 644 "$repo_dir/macos/Resources/T1Mark.icns" "$contents/Resources/"
 install -m 644 "$repo_dir/tools/xiaoai_daily.py" "$repo_dir/tools/bemfa_probe.py" "$bridge/"
 install -m 644 "$paho_dir/paho/__init__.py" "$bridge/paho/"

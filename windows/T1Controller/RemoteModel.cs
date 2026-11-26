@@ -12,7 +12,7 @@ namespace T1Controller;
 internal sealed record RemoteFace(string Name, double Yaw, string[] Keys);
 internal sealed record RemoteLabel(string Name, string Icon, string Action, string Guide, bool Left, double Level,
     bool Mappable, double[] Anchor);
-internal sealed record RemoteLegend(string Text, bool Literal, string Secondary);
+internal sealed record RemoteLegend(string Text, bool Literal, string Secondary, double[]? Color);
 internal sealed record RemotePart(string Key, double[] Matrix, byte[] Vertices, byte[] Triangles, byte[]? Normals,
     byte[]? Uv, double[]? Color, RemoteLegend? Legend);
 internal sealed record RemoteModel(string Name, RemotePart[] Parts, Dictionary<string, RemoteLabel> Keys, RemoteFace[] Faces)
@@ -26,7 +26,7 @@ internal sealed record RemoteModel(string Name, RemotePart[] Parts, Dictionary<s
         return JsonSerializer.Deserialize<RemoteModel[]>(decoded, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidOperationException("设备模型资源损坏。");
     });
-    public static RemoteModel For(bool xiaomi) => Assets.Value[xiaomi ? 1 : 0];
+    public static RemoteModel For(GuideDevice profile) => Assets.Value[(int)profile];
 }
 
 internal static class RemoteMesh
@@ -85,12 +85,14 @@ internal static class RemoteMesh
 
     private static Material Glyph(RemoteLegend legend)
     {
+        var ink = legend.Color is [var r, var g, var b]
+            ? new SolidColorBrush(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255))) : Brushes.WhiteSmoke;
         var plate = new Grid { Width = 80, Height = 80, Background = Brushes.Transparent };
         if (!legend.Literal && Icon(legend.Text) is { } drawing)
         {
             plate.Children.Add(new System.Windows.Shapes.Path
             {
-                Data = drawing, Stroke = Brushes.WhiteSmoke, StrokeThickness = 1.8,
+                Data = drawing, Stroke = ink, StrokeThickness = 1.8,
                 StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round, Width = 56, Height = 56, Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
@@ -100,7 +102,7 @@ internal static class RemoteMesh
         {
             plate.Children.Add(new TextBlock
             {
-                Text = legend.Text, Foreground = Brushes.WhiteSmoke, FontSize = legend.Text.Length > 1 ? 22 : 44,
+                Text = legend.Text, Foreground = ink, FontSize = legend.Text.Length > 1 ? 22 : 44,
                 FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center
             });
@@ -137,6 +139,10 @@ internal static class RemoteMesh
             "plus" => "M4,12 L20,12 M12,4 L12,20",
             "minus" => "M4,12 L20,12",
             "tv" => "M2,6 L22,6 22,18 2,18 Z M8,22 L16,22",
+            "arrow.right.square" => "M3,3 L21,3 21,21 3,21 Z M6,12 L17,12 13,8 M17,12 L13,16",
+            "play.rectangle.fill" => "M2,5 L22,5 22,19 2,19 Z M10,9 L16,12 10,15 Z",
+            "film" => "M3,3 L21,3 21,21 3,21 Z M7,3 L7,21 M17,3 L17,21 M3,8 L7,8 M3,16 L7,16 M17,8 L21,8 M17,16 L21,16",
+            "battery.100percent" => "M2,6 L21,6 21,18 2,18 Z M23,10 L23,14 M5,9 L18,9 18,15 5,15 Z",
             "bolt.fill" => "M14,2 L5,14 11,14 9,22 19,10 13,10 Z",
             "circle.inset.filled" => "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,8 A4,4 0 1 0 12,16 A4,4 0 1 0 12,8",
             _ => null

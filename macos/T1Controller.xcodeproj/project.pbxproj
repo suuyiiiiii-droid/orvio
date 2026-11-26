@@ -17,6 +17,7 @@
         D10000000000000000000023 /* RemoteScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000029; };
         D10000000000000000000024 /* T1Mark.icns in Resources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000002A; };
         D1000000000000000000002B /* PermissionGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000002C; };
+        D1000000000000000000002D /* mi-ao-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000002E; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,7 @@
         D10000000000000000000029 /* RemoteScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteScene.swift; sourceTree = "<group>"; };
         D1000000000000000000002A /* T1Mark.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = T1Mark.icns; path = Resources/T1Mark.icns; sourceTree = "<group>"; };
         D1000000000000000000002C /* PermissionGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGuide.swift; sourceTree = "<group>"; };
+        D1000000000000000000002E /* mi-ao-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../licenses/mi-ao-MIT.txt"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +54,7 @@
                 D1000000000000000000000D /* T1Controller */,
                 D10000000000000000000009 /* Info.plist */,
                 D1000000000000000000002A /* T1Mark.icns */,
+                D1000000000000000000002E /* mi-ao-MIT.txt */,
                 D1000000000000000000000E /* Products */,
             );
             sourceTree = "<group>";
@@ -145,7 +148,7 @@
         D10000000000000000000025 /* Resources */ = {
             isa = PBXResourcesBuildPhase;
             buildActionMask = 2147483647;
-            files = (D10000000000000000000024 /* T1Mark.icns in Resources */);
+            files = (D10000000000000000000024 /* T1Mark.icns in Resources */, D1000000000000000000002D /* mi-ao-MIT.txt in Resources */);
             runOnlyForDeploymentPostprocessing = 0;
         };
 /* End PBXResourcesBuildPhase section */

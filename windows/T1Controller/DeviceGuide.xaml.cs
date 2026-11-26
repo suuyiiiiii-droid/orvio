@@ -12,7 +12,7 @@ using System.Windows.Shapes;
 
 namespace T1Controller;
 
-internal enum GuideDevice { T1, Xiaomi }
+internal enum GuideDevice { T1, Xiaomi, Chromecast }
 
 public partial class DeviceGuide : UserControl
 {
@@ -33,7 +33,7 @@ public partial class DeviceGuide : UserControl
     private int faceIndex;
     private string selected = "ok";
     private Point? press, lastDrag;
-    private bool t1Connected, xiaomiConnected;
+    private bool t1Connected, xiaomiConnected, chromecastConnected;
     private bool ready, animating;
     private IReadOnlyList<ButtonBinding> summaryBindings = [];
     private RemoteMode? remoteMode;
@@ -63,10 +63,11 @@ public partial class DeviceGuide : UserControl
         LoadProfile(GuideDevice.T1);
     }
 
-    internal void UpdateConnections(bool t1, bool xiaomi)
+    internal void UpdateConnections(bool t1, bool xiaomi, bool chromecast)
     {
         t1Connected = t1;
         xiaomiConnected = xiaomi;
+        chromecastConnected = chromecast;
         UpdateConnectionLabel();
     }
 
@@ -84,9 +85,10 @@ public partial class DeviceGuide : UserControl
     private void UpdateConnectionLabel()
     {
         var xiaomi = current == GuideDevice.Xiaomi;
-        var connected = xiaomi ? xiaomiConnected : t1Connected;
+        var connected = current == GuideDevice.Chromecast ? chromecastConnected : xiaomi ? xiaomiConnected : t1Connected;
         ConnectionDot.Fill = connected ? Brushes.LightGreen : (Brush)FindResource("MutedBrush");
-        Connection.Text = xiaomi
+        Connection.Text = current == GuideDevice.Chromecast
+            ? connected ? "Chromecast 已连接" : "Chromecast 未检测到" : xiaomi
             ? connected ? "小米遥控器已连接" : "小米遥控器未检测到"
             : connected ? "T1 接收器已连接" : "T1 接收器未检测到";
     }
@@ -94,7 +96,7 @@ public partial class DeviceGuide : UserControl
     private void SelectProfile(object sender, RoutedEventArgs args)
     {
         if (sender is Button { Tag: string tag })
-            LoadProfile(tag == "1" ? GuideDevice.Xiaomi : GuideDevice.T1);
+            LoadProfile(tag == "2" ? GuideDevice.Chromecast : tag == "1" ? GuideDevice.Xiaomi : GuideDevice.T1);
     }
 
     private void LoadProfile(GuideDevice profile)
@@ -102,10 +104,11 @@ public partial class DeviceGuide : UserControl
         if (model is not null && current == profile) return;
         current = profile;
         var xiaomi = profile == GuideDevice.Xiaomi;
-        model = RemoteModel.For(xiaomi);
-        ProfileSubtitle.Text = xiaomi ? "小米蓝牙遥控器 2 Pro · RC003" : "T1 空中飞鼠";
-        T1Profile.Background = ChoiceBrush(!xiaomi);
+        model = RemoteModel.For(profile);
+        ProfileSubtitle.Text = profile == GuideDevice.Chromecast ? "Google Chromecast Voice Remote" : xiaomi ? "小米蓝牙遥控器 2 Pro · RC003" : "T1 空中飞鼠";
+        T1Profile.Background = ChoiceBrush(profile == GuideDevice.T1);
         XiaomiProfile.Background = ChoiceBrush(xiaomi);
+        ChromecastProfile.Background = ChoiceBrush(profile == GuideDevice.Chromecast);
         hardware.Children.Clear();
         parts.Clear();
         foreach (var part in model.Parts)
@@ -212,7 +215,7 @@ public partial class DeviceGuide : UserControl
                 button = new Button
                 {
                     Content = text, Width = 108, Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0),
-                    HorizontalContentAlignment = HorizontalAlignment.Left, ToolTip = label.Guide
+                    HorizontalContentAlignment = HorizontalAlignment.Left, ToolTip = WindowsGuide(key, label.Guide)
                 };
                 button.Click += (_, _) => SelectKey(key);
                 Labels.Children.Add(button);
@@ -318,11 +321,11 @@ public partial class DeviceGuide : UserControl
         if (model is null || !model.Keys.TryGetValue(selected, out var key)) return;
         KeyTitle.Text = key.Name;
         KeyIcon.Data = RemoteMesh.Icon(key.Icon);
-        KeyDetail.Text = key.Guide;
+        KeyDetail.Text = WindowsGuide(selected, key.Guide);
         var binding = Mapping(selected);
         var active = BindingAction(selected);
         KeyAction.Text = active ?? key.Action;
-        KeyStatus.Text = binding is null ? "原生功能" : !binding.Enabled ? "映射已暂停"
+        KeyStatus.Text = remoteMode == RemoteMode.Native ? "系统原生 · 按键直通" : binding is null ? "原生功能" : !binding.Enabled ? "映射已暂停"
             : NeedsNativeIsolation(binding) ? "原生未隔离 · 映射暂停"
             : active is null ? "当前模式未使用" : "映射开启";
         ConfigureButton.Visibility = key.Mappable ? Visibility.Visible : Visibility.Collapsed;
@@ -333,7 +336,7 @@ public partial class DeviceGuide : UserControl
     }
 
     private IEnumerable<ButtonBinding> ProfileBindings => summaryBindings.Where(binding =>
-        current == GuideDevice.Xiaomi
+        current == GuideDevice.Chromecast ? binding.DevicePath.Contains("9450", StringComparison.OrdinalIgnoreCase) : current == GuideDevice.Xiaomi
             ? binding.DevicePath.Contains("32B8", StringComparison.OrdinalIgnoreCase)
             : binding.DevicePath.Contains("1915", StringComparison.OrdinalIgnoreCase));
 
@@ -341,12 +344,19 @@ public partial class DeviceGuide : UserControl
     {
         string[] controls = key switch
         {
+            "power" when current == GuideDevice.Chromecast => ["hid:000C/019E/"],
+            "inputSource" when current == GuideDevice.Chromecast => ["hid:000C/0189/"],
             "voice" => new[] { "key:74/", "hid:000C/00CF/" },
-            "ok" => ["key:0D/"],
+            "ok" => ["key:0D/", "hid:000C/0041/"],
+            "up" => ["key:26/", "hid:000C/0042/"],
+            "down" => ["key:28/", "hid:000C/0043/"],
+            "back" => ["hid:000C/0224/"],
             "home" => ["key:24/", "hid:000C/0223/"],
             "menu" => ["key:5D/"],
-            "left" => ["key:25/", "hid:000C/00B6/"],
-            "right" => ["key:27/", "hid:000C/00B5/"],
+            "left" => ["key:25/", "hid:000C/00B6/", "hid:000C/0044/"],
+            "right" => ["key:27/", "hid:000C/00B5/", "hid:000C/0045/"],
+            "youtube" => ["hid:000C/0077/"],
+            "netflix" => ["hid:000C/0078/"],
             "mute" => ["key:AD/", "hid:000C/00E2/"],
             "volumeUp" => ["key:AF/", "hid:000C/00E9/"],
             "volumeDown" => ["key:AE/", "hid:000C/00EA/"],
@@ -361,6 +371,18 @@ public partial class DeviceGuide : UserControl
     private string? BindingAction(string key)
     {
         var binding = Mapping(key);
+        if (remoteMode == RemoteMode.Native)
+        {
+            if (binding is { Enabled: true, Role: ButtonRole.CycleMode }) return "原生功能／切换模式";
+            return key switch
+            {
+                "voice" => "系统语音输入", "mute" => "系统静音",
+                "volumeUp" => "系统音量＋", "volumeDown" => "系统音量−",
+                "up" or "down" or "left" or "right" => "方向导航",
+                "ok" => "确认／原生点击", "back" => "返回", "home" => "系统主页键",
+                _ => "系统原生功能"
+            };
+        }
         if (binding is not { Enabled: true } || !RemoteModes.Allows(binding.Role, remoteMode, remapping) ||
             NeedsNativeIsolation(binding)) return null;
         return binding.Role switch
@@ -373,11 +395,19 @@ public partial class DeviceGuide : UserControl
             ButtonRole.NextTrack when remoteMode == RemoteMode.Media || mediaMode => "下一曲",
             ButtonRole.VolumeUp => "提高音量",
             ButtonRole.VolumeDown => "降低音量",
-            ButtonRole.Mute => "切换系统静音",
+            ButtonRole.Mute => "切换静音",
             ButtonRole.Voice => "按住说话",
             _ => null
         };
     }
+
+    private static string WindowsGuide(string key, string fallback) => key switch
+    {
+        "voice" => "Windows 原生模式保留遥控器的系统语音键，具体行为以 Windows 听写和输入设置为准。媒体／主机模式使用已学习的语音键和所选录音设备；电脑语音快捷键在原生模式输入当前文本框。",
+        "mute" => "原生模式由 Windows 处理系统静音。媒体模式根据播放器列表和「优先调整播放器音量」设置，切换所选播放器或系统输出的静音。",
+        "power" or "inputSource" => "原生模式保留 Windows 对应的按键功能；自定义动作在相应组合中配置，并在原生隔离就绪后使用。",
+        _ => fallback
+    };
 
     private bool NeedsNativeIsolation(ButtonBinding binding) => RemoteModes.RequiresNativeIsolation(remoteMode, binding.Role);
 

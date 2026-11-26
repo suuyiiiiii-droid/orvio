@@ -64,7 +64,7 @@ extension RemoteSceneView {
             return (key.rawValue, [
                 "name": key.name, "icon": key.icon, "action": key.nativeAction(for: profile),
                 "guide": key.guide(for: profile), "left": placement.left, "level": placement.level,
-                "mappable": profile == .xiaomi ? key.isXiaomiMappable : key.candidate != nil,
+                "mappable": key.isMappable(for: profile),
                 "anchor": [p.x, p.y, p.z]
             ])
         })
@@ -76,6 +76,24 @@ extension RemoteSceneView {
 struct ExportRemoteModels {
     @MainActor static func main() throws {
         let models = RemoteProfile.allCases.map { RemoteSceneView(profile: $0).asset(for: $0) }
+        if let directory = ProcessInfo.processInfo.environment["ORVIO_REMOTE_PREVIEW_DIR"] {
+            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            for profile in RemoteProfile.allCases {
+                let view = RemoteSceneView(profile: profile)
+                for face in (profile == .xiaomi ? [.front, .side] : RemoteFace.allCases) {
+                    view.frame = NSRect(x: 0, y: 0, width: 720, height: 1000)
+                    view.apply(pose: RemotePose(yaw: face.yaw, pitch: 0.025), selected: .typing, pressed: nil, animate: false)
+                    let renderer = SCNRenderer(device: nil, options: nil)
+                    renderer.scene = view.scene
+                    renderer.pointOfView = view.pointOfView
+                    let image = renderer.snapshot(atTime: 0, with: NSSize(width: 720, height: 1000), antialiasingMode: .multisampling4X)
+                    guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                          let data = bitmap.representation(using: .png, properties: [:]) else { continue }
+                    let filename = "\(profile.rawValue)-\(face.rawValue).png"
+                    try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent(filename))
+                }
+            }
+        }
         let output = try JSONSerialization.data(withJSONObject: models, options: [.sortedKeys])
         FileHandle.standardOutput.write(output)
     }

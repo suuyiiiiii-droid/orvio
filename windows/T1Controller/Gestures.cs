@@ -6,9 +6,12 @@ using System.Linq;
 namespace T1Controller;
 
 internal enum Gesture { None, Press, Short, Long, Repeat }
+internal enum VoiceInputDestination { System, Text, Command }
 
 internal static class RemoteModes
 {
+    public static VoiceInputDestination VoiceDestination(RemoteMode? mode, bool systemNativeKey) =>
+        mode == RemoteMode.Native ? systemNativeKey ? VoiceInputDestination.System : VoiceInputDestination.Text : VoiceInputDestination.Command;
     public static string Title(RemoteMode? mode) => mode switch
     {
         RemoteMode.Native => "原生", RemoteMode.Media => "媒体", RemoteMode.Host => "主机切换", _ => "现有映射"
@@ -21,7 +24,8 @@ internal static class RemoteModes
         _ => RemoteMode.Media
     };
 
-    public static bool Allows(ButtonRole role, RemoteMode? mode, bool legacyEnabled) => role == ButtonRole.CycleMode || mode switch
+    public static bool Allows(ButtonRole role, RemoteMode? mode, bool legacyEnabled) =>
+        role == ButtonRole.CycleMode || (role == ButtonRole.Voice && mode is not null) || mode switch
     {
         RemoteMode.Native => false,
         RemoteMode.Media => role != ButtonRole.SwitchHost,
@@ -31,6 +35,7 @@ internal static class RemoteModes
 
     public static bool Conflicts(ButtonRole first, ButtonRole second) =>
         first == ButtonRole.CycleMode || second == ButtonRole.CycleMode ||
+        first == ButtonRole.Voice || second == ButtonRole.Voice ||
         (first == ButtonRole.SwitchHost) == (second == ButtonRole.SwitchHost);
 
     public static bool IsReturnKey(string control) => control.StartsWith("key:0D/", StringComparison.OrdinalIgnoreCase);
@@ -38,7 +43,7 @@ internal static class RemoteModes
     public static bool RequiresExclusiveReturn(RemoteMode? mode) => mode is RemoteMode.Media or RemoteMode.Host;
 
     public static bool RequiresNativeIsolation(RemoteMode? mode, ButtonRole role) =>
-        mode is not null && Allows(role, mode, legacyEnabled: true);
+        mode is RemoteMode.Media or RemoteMode.Host && Allows(role, mode, legacyEnabled: true);
 
     public static ActionKind? Resolve(ButtonRole role, Gesture gesture, RemoteMode? mode, bool legacyEnabled, bool legacyMedia)
     {

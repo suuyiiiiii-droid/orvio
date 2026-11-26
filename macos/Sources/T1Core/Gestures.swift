@@ -20,7 +20,8 @@ public enum KeyRole: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     public func conflicts(with other: Self) -> Bool {
-        self == .cycleMode || other == .cycleMode || (self == .switchHost) == (other == .switchHost)
+        self == .cycleMode || other == .cycleMode || self == .voice || other == .voice ||
+            (self == .switchHost) == (other == .switchHost)
     }
 
     /// Only known keyboard controls are enabled on learning; a native media
@@ -58,7 +59,7 @@ public enum RemoteMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     public static func allows(_ role: KeyRole, mode: Self?, legacyEnabled: Bool) -> Bool {
-        if role == .cycleMode { return true }
+        if role == .cycleMode || (role == .voice && mode != nil) { return true }
         switch mode {
         case .native: return false
         case .media: return role != .switchHost
@@ -72,6 +73,18 @@ public enum RemoteMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     public var requiresExclusiveReturn: Bool { self != .native }
+
+    /// Native mode never owns or suppresses a hardware key, including mode/voice keys.
+    public var isolatesMappedKeys: Bool { self != .native }
+}
+
+public enum VoiceDestination: Equatable, Sendable {
+    case system, focusedText, command
+
+    public static func resolve(mode: RemoteMode?, hasSystemVoiceKey: Bool) -> Self {
+        guard mode == .native else { return .command }
+        return hasSystemVoiceKey ? .system : .focusedText
+    }
 }
 
 public struct KeyBinding: Codable, Equatable, Sendable {

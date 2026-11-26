@@ -5,8 +5,12 @@ project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 model_dir="$(mktemp -d "${TMPDIR:-/tmp}/t1-scene.XXXXXX")"
 trap 'rm -rf "$model_dir"' EXIT
 cd "$project_dir"
+core_sources=()
+for source_file in macos/Sources/T1Core/*.swift; do
+    [[ "$(basename "$source_file")" == ._* ]] || core_sources+=("$source_file")
+done
 swiftc -emit-library -emit-module -module-name T1Core -module-cache-path "$model_dir/cache" \
-    macos/Sources/T1Core/*.swift -o "$model_dir/libT1Core.dylib"
+    "${core_sources[@]}" -o "$model_dir/libT1Core.dylib"
 sed -n '/^enum RemoteProfile: /,/^}/p' macos/Sources/T1Controller/ControllerModel.swift > "$model_dir/RemoteProfile.swift"
 cat macos/Sources/T1Controller/RemoteScene.swift tools/export_remote_models.swift > "$model_dir/Scene.swift"
 swiftc -D T1_EXPORT_REMOTE -I "$model_dir" -L "$model_dir" -lT1Core -module-cache-path "$model_dir/cache" \

@@ -3,6 +3,17 @@ import XCTest
 @testable import T1Core
 
 final class CoreTests: XCTestCase {
+    func testNativeModeNeverIsolatesKeysAndKeepsSystemVoiceSeparateFromCommands() {
+        XCTAssertFalse(RemoteMode.native.isolatesMappedKeys)
+        XCTAssertTrue(RemoteMode.media.isolatesMappedKeys)
+        XCTAssertTrue(RemoteMode.host.isolatesMappedKeys)
+        XCTAssertEqual(VoiceDestination.resolve(mode: .native, hasSystemVoiceKey: true), .system)
+        XCTAssertEqual(VoiceDestination.resolve(mode: .native, hasSystemVoiceKey: false), .focusedText)
+        for mode: RemoteMode? in [.media, .host, nil] {
+            XCTAssertEqual(VoiceDestination.resolve(mode: mode, hasSystemVoiceKey: true), .command)
+            XCTAssertEqual(VoiceDestination.resolve(mode: mode, hasSystemVoiceKey: false), .command)
+        }
+    }
     func testExclusiveReturnAppliesOnlyToReturnUsagesInMappedPresets() {
         XCTAssertTrue(RemoteMode.isReturnKey(page: 7, usage: 0x28))
         XCTAssertTrue(RemoteMode.isReturnKey(page: 7, usage: 0x58))
@@ -44,6 +55,18 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(press(.menu, mode: nil, from: 14, hold: 1), .action(.switchOtherHost))
         XCTAssertFalse(KeyRole.home.conflicts(with: .switchHost))
         XCTAssertTrue(KeyRole.cycleMode.conflicts(with: .switchHost))
+    }
+
+    func testVoiceRemainsAvailableAcrossModesWithoutSharingAMappedKey() {
+        for mode in RemoteMode.allCases {
+            XCTAssertTrue(RemoteMode.allows(.voice, mode: mode, legacyEnabled: false))
+            var engine = GestureEngine()
+            XCTAssertEqual(engine.handle(.voice, phase: .down, at: 0, mediaMode: false, mode: mode), .beginVoice)
+            XCTAssertEqual(engine.handle(.voice, phase: .up, at: 1, mediaMode: false, mode: mode), .finishVoice)
+        }
+        XCTAssertTrue(KeyRole.voice.conflicts(with: .switchHost))
+        XCTAssertTrue(KeyRole.switchHost.conflicts(with: .voice))
+        XCTAssertFalse(RemoteMode.allows(.voice, mode: nil, legacyEnabled: false))
     }
     func testSharedIntentFixtures() throws {
         struct Fixture: Decodable {

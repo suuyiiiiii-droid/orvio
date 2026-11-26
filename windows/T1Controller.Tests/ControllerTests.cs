@@ -12,6 +12,15 @@ namespace T1Controller.Tests;
 public sealed class ControllerTests
 {
     [Fact]
+    public void VoiceRemainsAvailableAcrossAllModesWithoutSharingTheHostKey()
+    {
+        foreach (var mode in Enum.GetValues<RemoteMode>())
+            Assert.True(RemoteModes.Allows(ButtonRole.Voice, mode, legacyEnabled: false));
+        Assert.True(RemoteModes.Conflicts(ButtonRole.Voice, ButtonRole.SwitchHost));
+        Assert.True(RemoteModes.Conflicts(ButtonRole.SwitchHost, ButtonRole.Voice));
+        Assert.False(RemoteModes.Allows(ButtonRole.Voice, null, legacyEnabled: false));
+    }
+    [Fact]
     public void SwitchingAwayAndBackInvalidatesTheOriginalPlayerRequest()
     {
         var settings = new Settings { CurrentPlayer = "soda" };
@@ -61,7 +70,8 @@ public sealed class ControllerTests
         Assert.True(RemoteModes.RequiresExclusiveReturn(RemoteMode.Host));
         Assert.True(RemoteModes.RequiresNativeIsolation(RemoteMode.Media, ButtonRole.VolumeUp));
         Assert.True(RemoteModes.RequiresNativeIsolation(RemoteMode.Host, ButtonRole.SwitchHost));
-        Assert.True(RemoteModes.RequiresNativeIsolation(RemoteMode.Native, ButtonRole.CycleMode));
+        Assert.False(RemoteModes.RequiresNativeIsolation(RemoteMode.Native, ButtonRole.CycleMode));
+        Assert.False(RemoteModes.RequiresNativeIsolation(RemoteMode.Native, ButtonRole.Voice));
         Assert.False(RemoteModes.RequiresNativeIsolation(RemoteMode.Native, ButtonRole.PlayPause));
         Assert.False(RemoteModes.RequiresNativeIsolation(null, ButtonRole.VolumeUp));
     }

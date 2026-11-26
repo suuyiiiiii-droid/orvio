@@ -21,6 +21,12 @@ internal sealed record RawDevice(IntPtr Handle, string Path, uint Type, ushort U
          Path.Contains("VID&002717_PID&32B8", StringComparison.OrdinalIgnoreCase) ||
          Path.Contains("VID_2717&PID_32B8", StringComparison.OrdinalIgnoreCase));
 
+    public bool IsChromecastRemote =>
+        (Vendor == 0x18D1 && Product == 0x9450) ||
+        Path.Contains("VID_18D1&PID_9450", StringComparison.OrdinalIgnoreCase) ||
+        Path.Contains("VID&0218D1_PID&9450", StringComparison.OrdinalIgnoreCase) ||
+        Path.Contains("VID&0118D1_PID&9450", StringComparison.OrdinalIgnoreCase);
+
     public string DisplayName
     {
         get
@@ -30,7 +36,7 @@ internal sealed record RawDevice(IntPtr Handle, string Path, uint Type, ushort U
             var suffix = id.Length > 2 ? $" · {id[2]}" : "";
             var kind = Type == 1 ? "键盘" : "HID";
             var hardware = Vendor is uint vid && Product is uint pid ? $"VID {vid:X4} · PID {pid:X4} · " : "";
-            var name = IsXiaomiRemote ? "小米遥控器 RC003 · " : IsT1 ? "T1 飞鼠 · " : "";
+            var name = IsChromecastRemote ? "Chromecast Remote · " : IsXiaomiRemote ? "小米遥控器 RC003 · " : IsT1 ? "T1 飞鼠 · " : "";
             return $"{name}{kind} · {UsagePage:X4}/{Usage:X4} · {hardware}{product}{suffix}";
         }
     }

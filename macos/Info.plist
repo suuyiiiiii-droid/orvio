@@ -30,6 +30,10 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>按住说话时，Orvio使用您选定的麦克风接收语音指令。</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>为系统输出或所选播放器提供音频静音兼容。音频回调不读取、保存或发送音频样本，取消静音或退出应用时解除。</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>连接您选择的 Chromecast 遥控器语音服务，在按住语音键时接收麦克风音频，并在松开时停止和转写。</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSScreenCaptureUsageDescription</key>

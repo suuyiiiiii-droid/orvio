@@ -15,6 +15,7 @@
     <Compile Include="../T1Controller/IntentParser.cs" Link="IntentParser.cs" />
     <Compile Include="../T1Controller/MusicLayout.cs" Link="MusicLayout.cs" />
     <Compile Include="../T1Controller/MonitorIdentity.cs" Link="MonitorIdentity.cs" />
+    <Compile Include="../T1Controller/AudioMutePolicy.cs" Link="AudioMutePolicy.cs" />
     <None Include="../../shared/intent-fixtures.json" Link="intent-fixtures.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

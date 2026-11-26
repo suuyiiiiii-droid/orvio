@@ -6,19 +6,24 @@ Source available for noncommercial use under the PolyForm Noncommercial License 
 
 [简体中文](README.zh-CN.md) · [Noncommercial use only](LICENSE)
 
-Orvio is a native macOS and Windows utility for remote-button mapping, music playback, display input switching, and Chinese voice commands. It supports T1 air-mouse receivers and Xiaomi RC003 Bluetooth remotes, with separate bindings for each device.
+Orvio is a native macOS and Windows utility for remote-button mapping, music playback, display input switching, and Chinese voice commands. It supports T1 air-mouse receivers, Xiaomi RC003 Bluetooth remotes, and Chromecast Voice Remote, with separate bindings for each device. The macOS Chromecast `0x011B` compatibility path is opt-in and hardware-specific.
 
 This is an actively developed source release. Hardware behavior depends on the remote, USB routing, display, and music-client version. Windows device-level native-key isolation still requires a compatible signed filter driver; mappings in the new isolated modes remain paused until that backend is available. See the detailed [usage and hardware notes](README.zh-CN.md).
 
 ## Features
 
 - **Native, media, and host modes:** switch button groups with a learned mode key or a desktop shortcut.
-- **Targeted music controls:** the selected player is the control target for playback, track changes, and mapped actions. Includes NetEase Cloud Music and Soda Music adapters.
+- **Targeted music controls:** the selected player is the control target for playback, track changes, volume, and mute. Includes NetEase Cloud Music and Soda Music adapters; compatible mute targets the selected application and its audio helpers.
 - **Per-device key isolation on macOS:** suppress mapped keyboard/consumer actions on supported remote collections, and restore them in native mode or on exit. HID services are rediscovered after reconnects.
 - **Dual-host switching:** display input control through BetterDisplay on macOS and DDC/CI APIs on Windows, with optional KMFU peripheral handoff.
-- **Push-to-talk:** system speech recognition on macOS or a separately configured local Whisper CLI. Voice song search and music-window automation are experimental and verify visible results before reporting success.
+- **Push-to-talk and dictation:** T1/Xiaomi retain system voice keys in macOS native mode. Chromecast uses an independent ATVV Bluetooth audio channel and sends native-mode transcripts to the focused editor through system keyboard events. Media/host modes dispatch voice commands. Windows retains native system keys for all three remotes and supports local Whisper for application voice workflows. Voice song search and music-window automation remain experimental.
 - **Optional XiaoAI bridge:** Home Assistant and Bemfa MQTT integration for a configured Xiaomi speaker. Credentials are supplied locally.
-- **Device guide:** interactive remote views and shared geometry assets for the T1 and Xiaomi RC003.
+- **Device guide and mode feedback:** shared interactive 3D geometry for T1, Xiaomi RC003, and Chromecast, including its curved back. A desktop HUD shows the active mode without taking keyboard focus.
+- **Fixed-level output mute on macOS:** macOS 14.2+ compatibility uses a private running Core Audio tap for outputs without a native mute control. Its callback does not read, record, or forward captured audio samples.
+
+## Latest verification
+
+The November 27 update passed 53 macOS tests and 42 portable Windows tests. Mac hardware checks covered T1 native system mute, T1/Chromecast media mute, NetEase/Soda mute and restore, and Chromecast dictation into TextEdit and Codex. The latest Windows changes and Xiaomi hardware were not revalidated on a Windows/Xiaomi setup; the Windows filter-driver limitation remains. See the [update and acceptance record](docs/update-2026-11-27.md), [Chromecast setup](docs/chromecast-remote.md), and [mode guide](docs/remote-guide-and-modes.md).
 
 ## Repository layout
 
@@ -61,7 +66,7 @@ python3 -m pip install --target /private/tmp/orvio-paho paho-mqtt==2.1.0
 bash tools/package_macos.sh /private/tmp/orvio-paho
 ```
 
-Build outputs are written to `build/` and are excluded from Git. Local builds use ad-hoc signing; permissions may need refreshing after rebuilding. Use the application's permission guide to check input monitoring, accessibility, microphone, speech recognition, and screen capture for the features you use.
+Build outputs are written to `build/` and are excluded from Git. Local builds use ad-hoc signing; permissions may need refreshing after rebuilding. Use the application's permission guide to check input monitoring, accessibility, Bluetooth, microphone, speech recognition, and screen capture for the features you use. Compatible mute also prompts separately for system-audio access on first use; a re-signed local build may require refreshing that grant.
 
 ## Build on Windows
 

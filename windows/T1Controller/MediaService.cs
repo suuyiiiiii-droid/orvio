@@ -221,7 +221,9 @@ internal sealed class MediaService(Settings settings)
         var volume = output.AudioEndpointVolume;
         if (action.Kind == ActionKind.ToggleMute)
         {
-            volume.Mute = !volume.Mute;
+            var muted = !volume.Mute;
+            volume.Mute = muted;
+            if (volume.Mute != muted) return ActionResult.Unavailable("系统未确认静音状态。请检查当前输出设备。");
             return new(ResultState.Confirmed, $"{output.FriendlyName} · {(volume.Mute ? "已静音" : "已取消静音")}。");
         }
 
@@ -256,39 +258,59 @@ internal sealed class MediaService(Settings settings)
                 catch (Exception failure) when (failure is System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException) { }
             }
         }
+        var parents = ProcessTree.Parents();
         using var enumerator = new MMDeviceEnumerator();
-        var levels = new List<float>();
-        foreach (var endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+        var endpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToArray();
+        var targets = new List<AudioSessionControl>();
+        try
         {
-            using (endpoint)
+            foreach (var endpoint in endpoints)
             {
                 var sessions = endpoint.AudioSessionManager.Sessions;
                 for (var index = 0; index < sessions.Count; index++)
                 {
-                    using var session = sessions[index];
-                    if (!owned.Contains(session.GetProcessID) || session.IsSystemSoundsSession) continue;
-                    if (revision != settings.PlayerSelectionRevision)
-                        return ActionResult.Unavailable("播放器选择已变更，本次音量操作已取消。");
-                    var volume = session.SimpleAudioVolume;
-                    if (action.Kind == ActionKind.ToggleMute) volume.Mute = !volume.Mute;
-                    else
-                    {
-                        var target = action.Kind switch
-                        {
-                            ActionKind.VolumeUp => volume.Volume + .05f,
-                            ActionKind.VolumeDown => volume.Volume - .05f,
-                            _ => (action.Volume ?? 0) / 100f
-                        };
-                        volume.Volume = Math.Clamp(target, 0, 1);
-                    }
-                    levels.Add(volume.Volume);
+                    var session = sessions[index];
+                    if (!session.IsSystemSoundsSession && AudioMutePolicy.BelongsToPlayer(session.GetProcessID, owned, parents))
+                        targets.Add(session);
+                    else session.Dispose();
                 }
             }
+            if (targets.Count == 0)
+                return ActionResult.Unavailable($"未找到 {player.Name} 的音频会话，请先播放音乐。");
+            var muteTarget = AudioMutePolicy.Target(targets.Select(session => session.SimpleAudioVolume.Mute));
+            var levels = new List<float>();
+            foreach (var session in targets)
+            {
+                if (revision != settings.PlayerSelectionRevision || settings.CurrentPlayer != player.Id)
+                    return ActionResult.Unavailable("播放器选择已变更，本次音量操作已停止。");
+                var volume = session.SimpleAudioVolume;
+                if (action.Kind == ActionKind.ToggleMute)
+                {
+                    volume.Mute = muteTarget;
+                    if (volume.Mute != muteTarget)
+                        return ActionResult.Unavailable($"{player.Name} 的音频会话未确认静音状态。");
+                }
+                else
+                {
+                    var target = action.Kind switch
+                    {
+                        ActionKind.VolumeUp => volume.Volume + .05f,
+                        ActionKind.VolumeDown => volume.Volume - .05f,
+                        _ => (action.Volume ?? 0) / 100f
+                    };
+                    volume.Volume = Math.Clamp(target, 0, 1);
+                }
+                levels.Add(volume.Volume);
+            }
+            return new(ResultState.Confirmed, action.Kind == ActionKind.ToggleMute
+                ? $"{player.Name} · {(muteTarget ? "已静音" : "已取消静音")}（{targets.Count} 个音频会话）。"
+                : $"{player.Name} · 应用音量 {Math.Round(levels.Average() * 100)}%。");
         }
-        return levels.Count > 0
-            ? new(ResultState.Confirmed, action.Kind == ActionKind.ToggleMute ? $"{player.Name} · 已切换应用静音。" :
-                $"{player.Name} · 应用音量 {Math.Round(levels.Average() * 100)}%。")
-            : ActionResult.Unavailable($"未找到 {player.Name} 的音频会话，请先播放音乐。");
+        finally
+        {
+            foreach (var session in targets) session.Dispose();
+            foreach (var endpoint in endpoints) endpoint.Dispose();
+        }
     }
 
     private static string DefaultSessionId(Player player) =>

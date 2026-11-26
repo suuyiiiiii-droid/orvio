@@ -87,6 +87,7 @@ final class RemoteSceneView: SCNView {
         switch profile {
         case .t1: buildHardware()
         case .xiaomi: buildXiaomi()
+        case .chromecast: buildChromecast()
         }
     }
 
@@ -243,11 +244,118 @@ final class RemoteSceneView: SCNView {
         register(.charge, on: port, anchor: SCNVector3(0, -3.38, 0))
     }
 
-    private func directionRing(y ringY: Double, radius: Double) {
+    /// Modelled from the supplied front, side and battery-cover photographs.
+    private func buildChromecast() {
+        let shell = NSColor(srgbRed: 0.61, green: 0.60, blue: 0.58, alpha: 1)
+        let face = NSColor(srgbRed: 0.77, green: 0.76, blue: 0.73, alpha: 1)
+        let cap = NSColor(srgbRed: 0.68, green: 0.67, blue: 0.64, alpha: 1)
+        let ink = NSColor(srgbRed: 0.12, green: 0.13, blue: 0.14, alpha: 1)
+        let body = roundedPlate(width: 2.03, height: 6.30, depth: 0.30, radius: 1.015, cornerSteps: 48)
+        body.chamferRadius = 0.10
+        body.chamferMode = .front
+        add(body, at: SCNVector3(0, 0, 0.10), color: shell).name = "shell"
+        bodyPanel(width: 1.91, height: 6.16, depth: 0.065, corner: 0.95, z: 0.299, color: face)
+        // The back is a half elliptical capsule, not an extruded flat plate.
+        let cover = add(ellipticalCapsuleBack(width: 2.03, height: 6.30, bulge: 0.43),
+                        at: SCNVector3(0, 0, -0.05), color: face)
+        register(.batteryCover, on: cover, anchor: SCNVector3(0, -0.7, -0.486))
+        for index in 0..<36 {
+            func point(_ step: Int) -> SCNVector3 {
+                let theta = -.pi / 2 + .pi * Double(step) / 36
+                return SCNVector3(sin(theta) * 1.018, 0.92, -0.05 - cos(theta) * 0.433)
+            }
+            let a = point(index), b = point(index + 1)
+            let delta = SCNVector3(b.x - a.x, b.y - a.y, b.z - a.z)
+            let length = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z)
+            let tube = SCNCylinder(radius: 0.004, height: CGFloat(length))
+            tube.radialSegmentCount = 8
+            let seam = add(tube, at: SCNVector3((a.x + b.x) / 2, a.y, (a.z + b.z) / 2), color: shell)
+            seam.look(at: b, up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, 1, 0))
+            seam.name = RemoteKey.batteryCover.rawValue
+        }
+        directionRing(y: 1.93, radius: 0.80, color: cap, z: 0.365, gap: 0)
+
+        func button(_ key: RemoteKey, _ x: Double, _ y: Double, _ radius: Double,
+                    symbol: String? = nil, literal: Bool = false, dark: Bool = false) {
+            let geometry = SCNCylinder(radius: radius, height: 0.060)
+            geometry.radialSegmentCount = 64
+            let node = add(geometry, at: SCNVector3(x, y, 0.366), color: dark ? ink : cap)
+            node.eulerAngles.x = .pi / 2
+            let anchor = SCNVector3(x, y, 0.403)
+            register(key, on: node, anchor: anchor)
+            if let symbol {
+                addLegend(symbol, width: literal ? radius * 1.85 : radius * 0.80, at: anchor,
+                          key: key, literal: literal, color: dark ? .white : ink)
+            }
+        }
+        button(.ok, 0, 1.93, 0.39)
+        button(.back, -0.46, 0.68, 0.28, symbol: "arrow.left")
+        button(.voice, 0.46, 0.68, 0.28, dark: true)
+        // Four white assistant dots, built as geometry so both platforms match.
+        for (x, y, radius) in [(0.405, 0.70, 0.063), (0.51, 0.75, 0.030),
+                                (0.51, 0.66, 0.039), (0.43, 0.60, 0.026)] {
+            let dot = SCNSphere(radius: radius)
+            dot.segmentCount = 20
+            add(dot, at: SCNVector3(x, y, 0.404), color: .white).name = RemoteKey.voice.rawValue
+        }
+        button(.home, -0.46, -0.16, 0.28, symbol: "house.fill")
+        button(.mute, 0.46, -0.16, 0.28, symbol: "speaker.slash.fill")
+        button(.youtube, -0.46, -1.00, 0.30, symbol: "YouTube", literal: true)
+        button(.netflix, 0.46, -1.00, 0.30, symbol: "NETFLIX", literal: true)
+        button(.power, -0.46, -1.89, 0.18, symbol: "power")
+        button(.inputSource, 0.46, -1.89, 0.18, symbol: "arrow.right.square")
+        box(width: 0.09, height: 0.025, depth: 0.008, radius: 0.010,
+            at: SCNVector3(0, -1.89, 0.338), color: NSColor(white: 0.58, alpha: 1)).name = "shell"
+        for (key, sign) in [(RemoteKey.volumeUp, 1.0), (.volumeDown, -1.0)] {
+            // One continuous pill-shaped rocker, with separate upper/lower hit regions.
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: -0.12, y: 0))
+            path.line(to: NSPoint(x: 0.12, y: 0))
+            for step in 0...24 {
+                let angle = .pi * Double(step) / 24
+                path.line(to: NSPoint(x: cos(angle) * 0.12, y: sign * (0.41 + sin(angle) * 0.12)))
+            }
+            path.close()
+            let rocker = add(SCNShape(path: path, extrusionDepth: 0.075),
+                             at: SCNVector3(1.008, 1.385, 0), color: cap)
+            rocker.eulerAngles.y = .pi / 2
+            let anchor = SCNVector3(1.053, 1.385 + sign * 0.265, 0)
+            register(key, on: rocker, anchor: anchor)
+        }
+    }
+
+    private func ellipticalCapsuleBack(width: Double, height: Double, bulge: Double) -> SCNGeometry {
+        let radius = width / 2
+        let straightHalf = height / 2 - radius
+        let rows = 120, columns = 64
+        var vertices: [SCNVector3] = [], normals: [SCNVector3] = [], indices: [Int32] = []
+        for row in 0...rows {
+            let y = -height / 2 + height * Double(row) / Double(rows)
+            let capY = y - min(straightHalf, max(-straightHalf, y))
+            let section = sqrt(max(0, radius * radius - capY * capY))
+            for column in 0...columns {
+                let angle = -.pi / 2 + .pi * Double(column) / Double(columns)
+                let x = section * sin(angle), z = -bulge * section / radius * cos(angle)
+                vertices.append(SCNVector3(x, y, z))
+                let nx = x / (radius * radius), ny = capY / (radius * radius), nz = z / (bulge * bulge)
+                let length = max(0.000001, sqrt(nx * nx + ny * ny + nz * nz))
+                normals.append(SCNVector3(nx / length, ny / length, nz / length))
+                if row < rows && column < columns {
+                    let a = Int32(row * (columns + 1) + column), b = a + Int32(columns + 1)
+                    indices += [a, b, a + 1, b, b + 1, a + 1]
+                }
+            }
+        }
+        return SCNGeometry(sources: [.init(vertices: vertices), .init(normals: normals)],
+                           elements: [.init(indices: indices, primitiveType: .triangles)])
+    }
+
+    private func directionRing(y ringY: Double, radius: Double, color: NSColor? = nil,
+                               z: Double = 0.305, gap: Double = 1) {
         let sectors: [(RemoteKey, Double)] = [(.right, 0), (.up, 90), (.left, 180), (.down, 270)]
         for (key, angle) in sectors {
-            let first = (angle - 44) * .pi / 180
-            let last = (angle + 44) * .pi / 180
+            let first = (angle - 45 + gap) * .pi / 180
+            let last = (angle + 45 - gap) * .pi / 180
             let path = NSBezierPath()
             for i in 0...20 {
                 let theta = first + (last - first) * Double(i) / 20
@@ -260,10 +368,10 @@ final class RemoteSceneView: SCNView {
             }
             path.close()
             let sector = SCNShape(path: path, extrusionDepth: 0.064)
-            sector.chamferRadius = 0.016
-            let node = add(sector, at: SCNVector3(0, ringY, 0.305), color: Self.graphite)
+            sector.chamferRadius = gap == 0 ? 0 : 0.016
+            let node = add(sector, at: SCNVector3(0, ringY, z), color: color ?? Self.graphite)
             let radians = angle * .pi / 180
-            let target = SCNVector3(cos(radians) * radius * 0.78, ringY + sin(radians) * radius * 0.78, 0.353)
+            let target = SCNVector3(cos(radians) * radius * 0.78, ringY + sin(radians) * radius * 0.78, z + 0.048)
             register(key, on: node, anchor: target)
         }
     }
@@ -273,15 +381,15 @@ final class RemoteSceneView: SCNView {
         add(panel, at: SCNVector3(0, 0, z), color: color).name = "shell"
     }
 
-    private func roundedPlate(width: Double, height: Double, depth: Double, radius: Double) -> SCNShape {
+    private func roundedPlate(width: Double, height: Double, depth: Double, radius: Double, cornerSteps: Int = 12) -> SCNShape {
         let x = width / 2 - radius
         let y = height / 2 - radius
         let corners = [(x, y), (-x, y), (-x, -y), (x, -y)]
         let path = NSBezierPath()
         // Sample the corners so SceneKit doesn't flatten the small model-space curves.
         for (corner, center) in corners.enumerated() {
-            for step in 0...12 {
-                let theta = (Double(corner) + Double(step) / 12) * .pi / 2
+            for step in 0...cornerSteps {
+                let theta = (Double(corner) + Double(step) / Double(cornerSteps)) * .pi / 2
                 let point = NSPoint(x: center.0 + cos(theta) * radius, y: center.1 + sin(theta) * radius)
                 if corner == 0 && step == 0 { path.move(to: point) } else { path.line(to: point) }
             }
@@ -365,7 +473,7 @@ final class RemoteSceneView: SCNView {
     @discardableResult
     private func addLegend(
         _ symbol: String, width: Double, at position: SCNVector3, key: RemoteKey,
-        literal: Bool = false, secondary: String? = nil
+        literal: Bool = false, secondary: String? = nil, color: NSColor = .white
     ) -> SCNNode {
         let tile = SCNPlane(width: width, height: width)
         let material = SCNMaterial()
@@ -375,7 +483,7 @@ final class RemoteSceneView: SCNView {
             material.diffuse.contents = NSImage(size: NSSize(width: 80, height: 80), flipped: false) { _ in
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: NSFont.systemFont(ofSize: symbol.count > 1 ? 22 : 44, weight: .semibold),
-                    .foregroundColor: NSColor.white
+                    .foregroundColor: color
                 ]
                 let text = NSAttributedString(string: symbol, attributes: attrs)
                 let size = text.size()
@@ -394,13 +502,15 @@ final class RemoteSceneView: SCNView {
         } else {
             material.diffuse.contents = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(pointSize: 72, weight: .semibold))?
-                .withSymbolConfiguration(.init(paletteColors: [NSColor(white: 0.91, alpha: 1)]))
+                .withSymbolConfiguration(.init(paletteColors: [color]))
         }
         let node = SCNNode(geometry: tile)
         tile.firstMaterial = material
         node.name = key.rawValue
         #if T1_EXPORT_REMOTE
-        exportLegends[ObjectIdentifier(node)] = ["text": symbol, "literal": literal, "secondary": secondary ?? ""]
+        let rgb = color.usingColorSpace(.sRGB) ?? .white
+        exportLegends[ObjectIdentifier(node)] = ["text": symbol, "literal": literal, "secondary": secondary ?? "",
+                                                "color": [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]]
         #endif
         node.position = position
         assembly.addChildNode(node)

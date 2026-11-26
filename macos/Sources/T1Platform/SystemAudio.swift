@@ -17,6 +17,11 @@ public struct AudioInputInfo: Identifiable, Sendable, Equatable {
 }
 
 public enum SystemOutput {
+    public static var supportsNativeMute: Bool {
+        guard let device = AudioHardware.defaultDevice(for: kAudioHardwarePropertyDefaultOutputDevice) else { return false }
+        return AudioHardware.isSettable(device, outputProperty(kAudioDevicePropertyMute)) &&
+            AudioHardware.get(device, outputProperty(kAudioDevicePropertyMute), initial: UInt32(0)) != nil
+    }
     public static func info() -> AudioOutputInfo? {
         guard let device = AudioHardware.defaultDevice(for: kAudioHardwarePropertyDefaultOutputDevice) else { return nil }
         return info(for: device)

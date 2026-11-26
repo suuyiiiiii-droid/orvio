@@ -2,6 +2,18 @@ import XCTest
 @testable import T1Platform
 
 final class NativeKeyMapTests: XCTestCase {
+    func testNativeModeReleasesVoiceMuteVolumeAndModeKeysAlongsideNavigation() {
+        let original = mapping(0x39, to: 0xE0)
+        let controls = Set([key(0x28), key(0x4F), key(0x50),
+                            HIDKey(page: 12, usage: 0xCF), HIDKey(page: 12, usage: 0xE2),
+                            HIDKey(page: 12, usage: 0xE9), HIDKey(page: 12, usage: 0xEA),
+                            HIDKey(page: 12, usage: 0x223)])
+        let media = NativeKeyMap.reconcile([original], owned: [], desired: NativeKeyMap.mute(controls))
+        XCTAssertEqual(media.owned.count, controls.count)
+        let native = NativeKeyMap.reconcile(media.merged, owned: media.owned, desired: [])
+        XCTAssertEqual(native.merged, [original])
+        XCTAssertTrue(native.owned.isEmpty)
+    }
     func testMappedModesOwnOnlyTheRequestedReturnAndNativeModeRestoresTheOriginalMap() {
         let unrelated = mapping(0x39, to: 0xE0)
         let returnKey = mapping(0x28, to: 0)

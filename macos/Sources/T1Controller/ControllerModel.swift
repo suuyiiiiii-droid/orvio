@@ -12,6 +12,7 @@ private let voiceKeyLog = Logger(subsystem: "local.t1controller.app", category: 
 enum RemoteProfile: String, CaseIterable, Identifiable {
     case t1 = "T1 飞鼠"
     case xiaomi = "小米蓝牙遥控器"
+    case chromecast = "Chromecast"
 
     var id: Self { self }
 }
@@ -27,11 +28,21 @@ final class ControllerModel: ObservableObject {
                 playerSelectionRevision &+= 1
                 musicAgentTask?.cancel()
             }
-            let bindingsChanged = prefs.bindings != oldValue.bindings || prefs.xiaomiBindings != oldValue.xiaomiBindings
+            let bindingsChanged = prefs.bindings != oldValue.bindings || prefs.xiaomiBindings != oldValue.xiaomiBindings ||
+                prefs.chromecastBindings != oldValue.chromecastBindings
+            if prefs.chromecastCompatibility != oldValue.chromecastCompatibility {
+                hid.chromecastCompatibilityEnabled = prefs.chromecastCompatibility
+                refreshNativeIsolation()
+            }
+            if prefs.chromecastVoiceEnabled != oldValue.chromecastVoiceEnabled {
+                if prefs.chromecastVoiceEnabled { chromecastVoice.start(cachedPeripheralID: prefs.chromecastPeripheralID) }
+                else { chromecastVoice.stop() }
+            }
             if prefs.mappingsEnabled != oldValue.mappingsEnabled || prefs.mediaMode != oldValue.mediaMode ||
                 prefs.remoteMode != oldValue.remoteMode || bindingsChanged {
                 resetInput()
             }
+            if prefs.remoteMode != oldValue.remoteMode { cancelVoice() }
             if bindingsChanged || (prefs.remoteMode == nil && prefs.mappingsEnabled != oldValue.mappingsEnabled) ||
                 (prefs.remoteMode == nil) != (oldValue.remoteMode == nil) {
                 updateMonitoredDevices()
@@ -62,6 +73,8 @@ final class ControllerModel: ObservableObject {
     @Published private(set) var devices: [HIDDevice] = []
     @Published private(set) var permission: HIDPermission = .unknown
     @Published private(set) var nativeIsolationStatus = ""
+    @Published private(set) var nativeSoftwareMuted = false
+    @Published private(set) var mutedPlayers: Set<String> = []
     @Published private(set) var audioInputs: [AudioInputInfo] = []
     @Published private(set) var microphoneAllowed = PushToTalk.microphoneAllowed
     @Published private(set) var audioOutput: AudioOutputInfo?
@@ -72,6 +85,14 @@ final class ControllerModel: ObservableObject {
     private var lastModeRelease: TimeInterval?
     @Published private(set) var activeKeyRole: KeyRole?
     @Published private(set) var activeXiaomiKeyRole: KeyRole?
+    @Published private(set) var activeChromecastKeyRole: KeyRole?
+    @Published private(set) var activeChromecastControl: String?
+    @Published private(set) var chromecastCompatibilityStatus = "短报文兼容未开启"
+    @Published private(set) var lastChromecastControl = ""
+    @Published private(set) var chromecastVoiceStatus = "Chromecast 语音未连接 · 需连接独立蓝牙语音通道"
+    @Published private(set) var chromecastVoiceReady = false
+    @Published private(set) var chromecastVoiceRecording = false
+    @Published private(set) var chromecastVoicePackets = 0
     @Published var mappingProfile: RemoteProfile = .t1 {
         didSet {
             guard mappingProfile != oldValue else { return }
@@ -94,6 +115,7 @@ final class ControllerModel: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isRecognizing = false
     @Published private(set) var lastTranscript = ""
+    @Published private(set) var lastVoiceDelivery = ""
     @Published private(set) var isRunningMusicAgent = false
     @Published private(set) var isRunningXiaoAI = false
     @Published private(set) var xiaoAIStatus = ""
@@ -106,6 +128,8 @@ final class ControllerModel: ObservableObject {
 
     private let hid = HIDInput()
     private let nativeIsolation = NativeKeyIsolation()
+    private let nativeAudio = NativeAudioMute()
+    private var nativeGestures: [String: GestureEngine] = [:]
     private var nativeIsolationPending = false
     private var lastIsolationRequest: [HIDDevice: Set<HIDKey>] = [:]
     private var isolationRefreshJob: Task<Void, Never>?
@@ -118,8 +142,11 @@ final class ControllerModel: ObservableObject {
     private let voiceHotkey = VoiceHotkey()
     private let actionHotkeys = ActionHotkeys()
     private let switcher = SwitchCoordinator()
+    private let chromecastVoice = ChromecastVoice()
     private var gestures: [RemoteProfile: GestureEngine] = [:]
     private var candidate: HIDEvent?
+    private var chromecastBasePresses: [HIDControl: (ChromecastBaseAction, pid_t, TimeInterval)] = [:]
+    private var chromecastLastRelease: [HIDControl: TimeInterval] = [:]
     private var probePressTimes: [String: [HIDControl: TimeInterval]] = [:]
     private var vendorReportCount = 0
     private var lastVendorReportUpdate: TimeInterval?
@@ -128,13 +155,16 @@ final class ControllerModel: ObservableObject {
     private var voiceSilenceJob: Task<Void, Never>?
     private var t1PulseReleaseAt: TimeInterval?
     private var voiceSession: UUID?
+    private var voiceDestination = VoiceDestination.command
+    private var voiceTextTarget: NativeTextInput?
+    private var textFocusObservation: NativeTextFocusObservation?
     private var audioObservation: AudioOutputObservation?
     private var storedPreferencesReadable = true
     private var playerActionInProgress = false
     private var playerSelectionRevision: UInt64 = 0
     private var musicAgentTask: Task<PlatformResult, Never>?
 
-    private enum VoiceOrigin: Equatable { case panel, keyboard, remote(String) }
+    private enum VoiceOrigin: Equatable { case panel, keyboard, remote(String), chromecast }
 
     init() {
         do {
@@ -144,7 +174,31 @@ final class ControllerModel: ObservableObject {
             settingsError = "设置文件读取失败。可以在按键页恢复设置。"
         }
         hid.onInput = { [weak self] in self?.receive($0) }
+        hid.onCompatibilityStateChange = { [weak self] in
+            guard let self else { return }
+            self.chromecastCompatibilityStatus = self.hid.chromecastCompatibilityStatus
+        }
+        hid.onCompatibilityRoutingChange = { [weak self] in self?.scheduleIsolationRefresh() }
         hid.onStateChange = { [weak self] in self?.refreshDevices() }
+        chromecastVoice.onStateChange = { [weak self] in
+            guard let self else { return }
+            if self.chromecastVoicePackets == 0, self.chromecastVoice.packetCount > 0,
+               self.voiceDestination == .focusedText {
+                RemoteModeHUD.shared.showVoice(title: "可以说话", detail: "原生转文字 · 松开语音键结束")
+            }
+            self.chromecastVoiceStatus = self.chromecastVoice.status
+            self.chromecastVoiceReady = self.chromecastVoice.isReady
+            self.chromecastVoiceRecording = self.chromecastVoice.isRecording
+            self.chromecastVoicePackets = self.chromecastVoice.packetCount
+        }
+        chromecastVoice.onStart = { [weak self] in self?.beginChromecastVoice() ?? false }
+        chromecastVoice.onFinish = { [weak self] samples, rate in self?.finishChromecastVoice(samples, sampleRate: rate) }
+        chromecastVoice.onCancelled = { [weak self] reason in
+            guard let self, self.voiceOrigin == .chromecast else { return }
+            self.cancelVoice()
+            self.notice = Outcome(.unavailable, reason)
+        }
+        chromecastVoice.onConnected = { [weak self] id in self?.prefs.chromecastPeripheralID = id }
         hid.onInputReset = { [weak self] device in
             guard let self else { return }
             if self.candidate?.device.id == device.id { self.candidate = nil }
@@ -162,13 +216,21 @@ final class ControllerModel: ObservableObject {
             }
         }
         audioOutput = SystemOutput.info()
+        nativeAudio.onChange = { [weak self] in self?.nativeSoftwareMuted = $0 }
+        nativeAudio.onPlayerChange = { [weak self] id, muted in
+            guard let self else { return }
+            if muted { self.mutedPlayers.insert(id) } else { self.mutedPlayers.remove(id) }
+        }
         updateMonitoredDevices()
+        hid.chromecastCompatibilityEnabled = prefs.chromecastCompatibility
         hid.start()
+        if prefs.chromecastVoiceEnabled { chromecastVoice.start(cachedPeripheralID: prefs.chromecastPeripheralID) }
         refreshDevices()
         refreshAudioInputs()
         audioObservation = SystemOutput.observeDefaultOutput { [weak self] output in
             Task { @MainActor [weak self] in
                 self?.audioOutput = output
+                self?.nativeAudio.outputChanged(to: output?.uid)
                 self?.updateOwnership()
             }
         }
@@ -179,13 +241,16 @@ final class ControllerModel: ObservableObject {
         }
         updateVoiceHotkey()
         updateActionHotkeys()
+        textFocusObservation = NativeTextFocusObservation { [weak self] in self?.prefs.remoteMode == .native }
+        if prefs.remoteMode == .native { NativeTextInput.prepareForeground() }
     }
 
-    var recordingLevel: Float { voice.level }
+    var recordingLevel: Float { voiceOrigin == .chromecast ? chromecastVoice.level : voice.level }
     var currentPlayerName: String {
         prefs.players.first(where: { $0.id == prefs.playerID })?.name ?? "未选择"
     }
     var microphoneName: String {
+        if voiceOrigin == .chromecast { return "Chromecast 遥控器麦克风（蓝牙）" }
         if let live = voice.inputName { return live }
         if let input = audioInputs.first(where: { $0.uid == prefs.microphoneUID }) {
             return input.name
@@ -288,14 +353,20 @@ final class ControllerModel: ObservableObject {
     var directT1Devices: Set<String> { HIDDevice.directT1LearningGroup(in: devices) }
 
     var xiaomiDevices: [HIDDevice] { devices.filter(\.isXiaomiBluetoothRemote) }
+    var chromecastDevices: [HIDDevice] { devices.filter(\.isChromecastRemote) }
 
     var diagnosticDevices: [HIDDevice] {
-        mappingProfile == .xiaomi ? xiaomiDevices : devices.filter { !$0.isXiaomiBluetoothRemote }
+        switch mappingProfile {
+        case .xiaomi: xiaomiDevices
+        case .chromecast: chromecastDevices
+        case .t1: devices.filter { !$0.isXiaomiBluetoothRemote && !$0.isChromecastRemote }
+        }
     }
 
     private var preferredDiagnosticDevice: String {
         if mappingProfile == .t1 { return directT1Devices.isEmpty ? "" : Self.directT1Selection }
-        return xiaomiDevices.count == 1 ? xiaomiDevices[0].id : ""
+        let candidates = mappingProfile == .chromecast ? chromecastDevices : xiaomiDevices
+        return candidates.count == 1 ? candidates[0].id : ""
     }
 
     var canLearnKey: Bool {
@@ -364,6 +435,11 @@ final class ControllerModel: ObservableObject {
     }
 
     func learn(_ role: KeyRole) -> Bool {
+        if mappingProfile == .chromecast, role == .voice {
+            connectChromecastVoice()
+            notice = Outcome(.submitted, "Chromecast 语音键通过独立 ATVV 通道接入，无需 HID 学习。请查看语音连接状态。")
+            return false
+        }
         guard permission == .granted else {
             notice = Outcome(.unavailable, "先在系统设置开启当前版本的输入监控")
             return false
@@ -387,7 +463,11 @@ final class ControllerModel: ObservableObject {
     }
 
     private func bindings(for profile: RemoteProfile) -> [String: KeyBinding] {
-        profile == .xiaomi ? prefs.xiaomiBindings : prefs.bindings
+        switch profile {
+        case .t1: prefs.bindings
+        case .xiaomi: prefs.xiaomiBindings
+        case .chromecast: prefs.chromecastBindings
+        }
     }
 
     private func uses(_ device: HIDDevice, in profile: RemoteProfile) -> Bool {
@@ -397,8 +477,11 @@ final class ControllerModel: ObservableObject {
     var editedBindings: [String: KeyBinding] {
         get { bindings(for: mappingProfile) }
         set {
-            if mappingProfile == .xiaomi { prefs.xiaomiBindings = newValue }
-            else { prefs.bindings = newValue }
+            switch mappingProfile {
+            case .t1: prefs.bindings = newValue
+            case .xiaomi: prefs.xiaomiBindings = newValue
+            case .chromecast: prefs.chromecastBindings = newValue
+            }
         }
     }
 
@@ -409,7 +492,9 @@ final class ControllerModel: ObservableObject {
     }
 
     func needsNativeIsolation(_ binding: KeyBinding) -> Bool {
-        guard prefs.remoteMode != nil else { return false }
+        guard prefs.remoteMode?.isolatesMappedKeys == true else { return false }
+        if let key = HIDKey(controlID: binding.control), let device = isolationDevice(for: binding),
+           hid.usesChromecastCompatibility(device, key: key) { return false }
         guard !nativeIsolationPending, let key = HIDKey(controlID: binding.control),
               let device = isolationDevice(for: binding) else { return true }
         return !nativeIsolation.isIsolated(device, key: key)
@@ -417,30 +502,33 @@ final class ControllerModel: ObservableObject {
 
     func nativeBindingStatus(_ binding: KeyBinding) -> String {
         if isolationDevice(for: binding) == nil { return "设备未连接或无法独立识别" }
+        if let key = HIDKey(controlID: binding.control), let device = isolationDevice(for: binding),
+           hid.usesChromecastCompatibility(device, key: key) { return "短报文兼容 · 不产生系统原生按键" }
         return needsNativeIsolation(binding) ? "原生未隔离 · 映射暂停" : "原生已隔离"
     }
 
     private func isolationDevice(for binding: KeyBinding) -> HIDDevice? {
         let matches = devices.filter { $0.fingerprint == binding.device }
         guard matches.count == 1, let device = matches.first,
-              device.isDirectT1Receiver || device.isXiaomiBluetoothRemote else { return nil }
+              device.isDirectT1Receiver || device.isXiaomiBluetoothRemote || device.isChromecastRemote else { return nil }
         return device
     }
 
     private func refreshNativeIsolation(retry: Int = 0) {
         isolationRefreshJob?.cancel()
         isolationRefreshJob = nil
-        let activeBindings = [prefs.bindings, prefs.xiaomiBindings].flatMap { profile in
+        let activeBindings = [prefs.bindings, prefs.xiaomiBindings, prefs.chromecastBindings].flatMap { profile in
             profile.compactMap { key, binding -> KeyBinding? in
                 guard binding.enabled, let role = KeyRole(rawValue: key), allowsRemoteRole(role) else { return nil }
                 return binding
             }
         }
         var requested: [HIDDevice: Set<HIDKey>] = [:]
-        if permission == .granted, prefs.remoteMode != nil {
+        if permission == .granted, prefs.remoteMode?.isolatesMappedKeys == true {
             for binding in activeBindings {
                 guard let key = HIDKey(controlID: binding.control), key.supportsNativeIsolation,
-                      let device = isolationDevice(for: binding) else { continue }
+                      let device = isolationDevice(for: binding),
+                      !hid.usesChromecastCompatibility(device, key: key) else { continue }
                 requested[device, default: []].insert(key)
             }
         }
@@ -459,7 +547,7 @@ final class ControllerModel: ObservableObject {
         } else if nativeIsolation.restoreFailed {
             nativeIsolationStatus = "macOS 未确认原生按键已恢复。请重新接入遥控器。"
         } else if prefs.remoteMode == .native {
-            nativeIsolationStatus = "原生模式恢复系统按键，仅保留模式切换键。"
+            nativeIsolationStatus = "T1／小米原生按键直通系统，语音使用系统听写；Chromecast 使用兼容输入。"
         } else if prefs.remoteMode == nil {
             nativeIsolationStatus = "现有映射沿用系统按键行为。"
         } else if activeBindings.isEmpty {
@@ -498,8 +586,10 @@ final class ControllerModel: ObservableObject {
     }
 
     func selectRemoteMode(_ mode: RemoteMode) {
+        guard prefs.remoteMode != mode else { return }
         prefs.remoteMode = mode
         notice = Outcome(.confirmed, "遥控器已切到「\(mode.title)」模式")
+        RemoteModeHUD.shared.show(mode, player: currentPlayerName)
     }
 
     func restoreBindings() {
@@ -510,9 +600,65 @@ final class ControllerModel: ObservableObject {
         } else {
             editedBindings = [:]
             if mappingProfile == .t1 { prefs.mediaMode = false }
+            if mappingProfile == .chromecast { prefs.chromecastBaseActions = [:] }
         }
         resetInput()
         notice = Outcome(.confirmed, "已恢复按键设置")
+    }
+
+    func installChromecastPreset() {
+        guard chromecastDevices.count == 1, let device = chromecastDevices.first else {
+            notice = Outcome(.unavailable, "请只连接一只 Chromecast Remote 后应用预设")
+            return
+        }
+        let usages: [(KeyRole, UInt32)] = [(.cycleMode, 0x223), (.home, 0x41), (.left, 0x44), (.right, 0x45),
+            (.volumeUp, 0xE9), (.volumeDown, 0xEA), (.mute, 0xE2), (.switchHost, 0x224)]
+        prefs.chromecastBindings = Dictionary(uniqueKeysWithValues: usages.map { role, usage in
+            (role.rawValue, KeyBinding(device: device.fingerprint,
+                control: String(format: "hid:000C:%04X:02", usage), enabled: true))
+        })
+        selectRemoteMode(.media)
+        notice = Outcome(.confirmed, "Chromecast 媒体预设已应用：OK 播放暂停、左右切歌、主页切组合；主机模式用返回切主机。")
+    }
+
+    private func processChromecastBase(_ event: HIDEvent) {
+        // A key reserved by a mapped preset must not regain Return (or another
+        // native action) just because its role is inactive in the current mode.
+        if prefs.remoteMode != .native, prefs.chromecastBindings.values.contains(where: {
+            $0.enabled && $0.device == event.device.fingerprint && $0.control == event.control.id
+        }) { return }
+        switch event.phase {
+        case .down:
+            guard chromecastBasePresses[event.control] == nil,
+                  let button = ChromecastButton.all.first(where: { $0.id == event.control.id }) else { return }
+            let action = prefs.chromecastBaseActions[button.id] ?? button.defaultAction
+            let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+            chromecastBasePresses[event.control] = (action, pid, event.timestamp)
+        case .repeatPress: break
+        case .up:
+            guard let (action, pid, start) = chromecastBasePresses.removeValue(forKey: event.control),
+                  (0...10).contains(event.timestamp - start),
+                  chromecastLastRelease[event.control].map({ start - $0 >= 0.075 }) ?? true else { return }
+            chromecastLastRelease[event.control] = event.timestamp
+            if let media = action.action {
+                if prefs.remoteMode == .native { handleNativeChromecastMedia(media) }
+                else { submit(media) }
+                return
+            }
+            guard let key = action.keyCode else { return }
+            guard AXIsProcessTrusted() else {
+                notice = Outcome(.unavailable, "方向键与回车修复需要 Orvio 的辅助功能权限")
+                return
+            }
+            // Keep a press attached to its original foreground app. A focus
+            // change while the remote is held must not click the new window.
+            guard pid > 0, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  let source = CGEventSource(stateID: .privateState),
+                  let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false) else { return }
+            down.flags = []; up.flags = []
+            down.postToPid(pid); up.postToPid(pid)
+        }
     }
 
     func addPlayer() {
@@ -739,6 +885,7 @@ final class ControllerModel: ObservableObject {
     }
 
     func cancelVoice() {
+        let cancelBluetooth = voiceOrigin == .chromecast
         let wasActive = voiceSession != nil
         voiceSilenceJob?.cancel()
         voiceSilenceJob = nil
@@ -746,11 +893,54 @@ final class ControllerModel: ObservableObject {
         voiceJob?.cancel()
         voiceJob = nil
         voiceSession = nil
+        voiceTextTarget = nil
         voiceOrigin = nil
+        if cancelBluetooth { chromecastVoice.cancelCapture() }
         voice.cancel()
         isRecording = false
         isRecognizing = false
         if wasActive { notice = Outcome(.unavailable, "语音已取消") }
+    }
+
+    func connectChromecastVoice() {
+        guard chromecastDevices.count == 1 else {
+            notice = Outcome(.unavailable, "请先在系统蓝牙中连接唯一的一只 Chromecast Remote")
+            return
+        }
+        if prefs.chromecastVoiceEnabled {
+            chromecastVoice.stop()
+            chromecastVoice.start(cachedPeripheralID: prefs.chromecastPeripheralID)
+        } else { prefs.chromecastVoiceEnabled = true }
+    }
+
+    private func beginChromecastVoice() -> Bool {
+        guard voiceOrigin == nil else { return false }
+        if isRecognizing { cancelVoice() }
+        voiceOrigin = .chromecast
+        voiceSession = UUID()
+        prepareVoiceDestination()
+        lastTranscript = ""
+        isRecording = true
+        notice = Outcome(.submitted, "Chromecast 语音键已按下，正在接收遥控器音频")
+        return true
+    }
+
+    private func finishChromecastVoice(_ samples: [Float], sampleRate: Double) {
+        guard voiceOrigin == .chromecast, let token = voiceSession else { return }
+        voiceOrigin = nil
+        isRecording = false
+        isRecognizing = true
+        notice = Outcome(.submitted, "遥控器麦克风已停止，正在本地转写")
+        let config = whisperConfiguration
+        voiceJob = Task {
+            let result = await voice.recognizePCM(samples, sampleRate: sampleRate, using: config)
+            await completeVoiceRecognition(result, token: token, bluetooth: true)
+        }
+    }
+
+    private var whisperConfiguration: WhisperConfiguration? {
+        prefs.whisperExecutable.isEmpty && prefs.whisperModel.isEmpty ? nil :
+            WhisperConfiguration(executablePath: prefs.whisperExecutable, modelPath: prefs.whisperModel)
     }
 
     private func save() {
@@ -765,7 +955,7 @@ final class ControllerModel: ObservableObject {
 
     private func updateMonitoredDevices() {
         // Follow releases across presets so a held key cannot become a fresh press at a mode change.
-        let bound = [prefs.bindings, prefs.xiaomiBindings].flatMap { profile in
+        let bound = [prefs.bindings, prefs.xiaomiBindings, prefs.chromecastBindings].flatMap { profile in
             profile.compactMap { key, binding -> String? in
                 guard binding.enabled, let role = KeyRole(rawValue: key),
                       prefs.remoteMode != nil || RemoteMode.allows(role, mode: nil, legacyEnabled: prefs.mappingsEnabled)
@@ -774,7 +964,7 @@ final class ControllerModel: ObservableObject {
             }
         }
         hid.monitoredDeviceFingerprints = Set(bound).union(devices.filter {
-            $0.isDirectT1Receiver || $0.isXiaomiBluetoothRemote
+            $0.isDirectT1Receiver || $0.isXiaomiBluetoothRemote || $0.isChromecastRemote
         }.map(\.fingerprint))
     }
 
@@ -815,10 +1005,16 @@ final class ControllerModel: ObservableObject {
     }
 
     private func resetInput(in profile: RemoteProfile? = nil) {
+        nativeGestures.removeAll()
         if let profile { gestures[profile] = nil }
         else { gestures.removeAll() }
-        if profile != .xiaomi { activeKeyRole = nil }
-        if profile != .t1 { activeXiaomiKeyRole = nil }
+        if profile == nil || profile == .t1 { activeKeyRole = nil }
+        if profile == nil || profile == .xiaomi { activeXiaomiKeyRole = nil }
+        if profile == nil || profile == .chromecast {
+            activeChromecastKeyRole = nil
+            activeChromecastControl = nil
+            chromecastBasePresses.removeAll()
+        }
         guard case .remote(let fingerprint) = voiceOrigin else { return }
         if let profile, !bindings(for: profile).values.contains(where: { $0.device == fingerprint }) { return }
         cancelVoice()
@@ -826,6 +1022,14 @@ final class ControllerModel: ObservableObject {
     }
 
     private func receive(_ event: HIDEvent) {
+        if event.device.isChromecastRemote {
+            if event.phase == .down { activeChromecastControl = event.control.id }
+            else if event.phase == .up && activeChromecastControl == event.control.id { activeChromecastControl = nil }
+        }
+        if event.device.isChromecastRemote {
+            let name = ChromecastButton.all.first { $0.id == event.control.id }?.name ?? event.control.id
+            lastChromecastControl = "\(name) · \(event.phase == .up ? "松开" : "按下")"
+        }
         defer {
             if nativeIsolationPending, !hid.isHoldingRemoteKey { scheduleIsolationRefresh() }
         }
@@ -844,7 +1048,8 @@ final class ControllerModel: ObservableObject {
                 }
             case .repeatPress: phase = "重复"
             }
-            inputLog.append("\(phase)  \(event.control.id)  \(event.integerValue)\(durationLabel)")
+            let source = event.source == .chromecastCompatibility ? " · 蓝牙短报文" : ""
+            inputLog.append("\(phase)  \(event.control.id)  \(event.integerValue)\(durationLabel)\(source)")
             if inputLog.count > 40 { inputLog.removeFirst(inputLog.count - 40) }
         }
         if let role = learningRole {
@@ -885,9 +1090,9 @@ final class ControllerModel: ObservableObject {
                 }
                 learningRole = nil
                 self.candidate = nil
-                let useImmediately = event.device.isDirectT1Receiver && role.matchesStandardPlaybackKey(
+                let useImmediately = event.source == .chromecastCompatibility || (event.device.isDirectT1Receiver && role.matchesStandardPlaybackKey(
                     page: event.control.usagePage, usage: event.control.usage
-                )
+                ))
                 editedBindings[role.rawValue] = KeyBinding(device: device, control: control, enabled: useImmediately)
                 if event.control.usagePage == 0x09 {
                     notice = Outcome(.unavailable, "OK 的鼠标左键输入尚无法独立隔离，请关闭空鼠并用回车方式重新学习")
@@ -905,12 +1110,21 @@ final class ControllerModel: ObservableObject {
             return
         }
         guard event.isMonitored else { return }
+        if prefs.remoteMode == .native {
+            if event.source == .chromecastCompatibility { processChromecastBase(event) }
+            if event.device.isDirectT1Receiver || event.device.isXiaomiBluetoothRemote {
+                handleNativeKeyboard(event)
+            }
+        }
         for profile in RemoteProfile.allCases {
             guard let role = bindings(for: profile).first(where: { key, binding in
                 binding.enabled && binding.device == event.device.fingerprint && binding.control == event.control.id &&
                     KeyRole(rawValue: key).map(allowsRemoteRole) == true
             }).flatMap({ KeyRole(rawValue: $0.key) }) else { continue }
-            if prefs.remoteMode != nil,
+            // T1/Xiaomi keep their original voice key. Only the mode key is
+            // observed here; no native key is remapped or consumed in native mode.
+            if prefs.remoteMode == .native && role != .cycleMode { continue }
+            if prefs.remoteMode?.isolatesMappedKeys == true, event.source != .chromecastCompatibility,
                (nativeIsolationPending || !nativeIsolation.isIsolated(event.device,
                     key: HIDKey(page: event.control.usagePage, usage: event.control.usage))) {
                 if event.phase == .up {
@@ -925,6 +1139,49 @@ final class ControllerModel: ObservableObject {
             process(event, as: role, in: profile)
             return
         }
+        if prefs.remoteMode != .native, event.source == .chromecastCompatibility { processChromecastBase(event) }
+    }
+
+    private func handleNativeKeyboard(_ event: HIDEvent) {
+        let isMute = (event.control.usagePage == 0x0C && event.control.usage == 0xE2) ||
+            (event.control.usagePage == 0x07 && event.control.usage == 0x7F)
+        if isMute {
+            let phase: KeyPhase = event.phase == .down ? .down : event.phase == .up ? .up : .repeatPress
+            if nativeGestures[event.device.fingerprint, default: GestureEngine()].handle(
+                .mute, phase: phase, at: event.timestamp, mediaMode: false, mode: nil
+            ) == .action(.toggleMute) {
+                Task {
+                    if let result = await nativeAudio.handleNativeKeyFallback() { updateNativeMuteResult(result) }
+                }
+            }
+        }
+        if event.phase == .down && ((event.control.usagePage == 0x0C && event.control.usage == 0xCF) ||
+                                   (event.device.isXiaomiBluetoothRemote && event.control.usagePage == 7 && event.control.usage == 0x3E)) {
+            notice = Outcome(.submitted, "原生语音键已交给 macOS；文字由系统听写输入当前文本框。")
+        }
+    }
+
+    private func handleNativeChromecastMedia(_ action: ControllerAction) {
+        switch action {
+        case .toggleMute:
+            Task { updateNativeMuteResult(await nativeAudio.toggle()) }
+        case .volumeUp: notice = outcome(NativeMediaKeys.send(.volumeUp))
+        case .volumeDown: notice = outcome(NativeMediaKeys.send(.volumeDown))
+        case .togglePlayback: notice = outcome(NativeMediaKeys.send(.playPause))
+        case .previousTrack: notice = outcome(NativeMediaKeys.send(.previous))
+        case .nextTrack: notice = outcome(NativeMediaKeys.send(.next))
+        default: submit(action) // explicit user-defined base action
+        }
+    }
+
+    func releaseNativeSoftwareMute() { updateNativeMuteResult(nativeAudio.release()) }
+
+    private func updateNativeMuteResult(_ result: PlatformResult) {
+        updateOutput(result)
+        if result.status == .confirmed {
+            RemoteModeHUD.shared.showSystemMute(nativeAudio.isSoftwareMuted || audioOutput?.isMuted == true,
+                                               device: audioOutput?.name ?? "系统音频输出")
+        }
     }
 
     private func process(_ event: HIDEvent, as role: KeyRole, in profile: RemoteProfile) {
@@ -937,11 +1194,13 @@ final class ControllerModel: ObservableObject {
         case .down:
             phase = .down
             if profile == .t1 { activeKeyRole = role }
-            else { activeXiaomiKeyRole = role }
+            else if profile == .xiaomi { activeXiaomiKeyRole = role }
+            else { activeChromecastKeyRole = role }
         case .up:
             phase = .up
             if profile == .t1 && activeKeyRole == role { activeKeyRole = nil }
             if profile == .xiaomi && activeXiaomiKeyRole == role { activeXiaomiKeyRole = nil }
+            if profile == .chromecast && activeChromecastKeyRole == role { activeChromecastKeyRole = nil }
         case .repeatPress: phase = .repeatPress
         }
         switch gestures[profile, default: GestureEngine()].handle(
@@ -990,8 +1249,22 @@ final class ControllerModel: ObservableObject {
             if prefs.playerVolumeSteps { await setSelectedPlayerVolume(percent) }
             else { updateOutput(SystemOutput.set(percent: percent)) }
         case .toggleMute:
-            if prefs.playerVolumeSteps { await setSelectedPlayerVolume(nil) }
-            else { updateOutput(SystemOutput.toggleMute()) }
+            if prefs.playerVolumeSteps {
+                guard let target = profiles.first(where: { $0.bundleID == prefs.playerID }) else {
+                    notice = Outcome(.unavailable, "请先选择播放器。")
+                    return
+                }
+                let selection = playerSelectionRevision
+                let result = await nativeAudio.togglePlayer(target, isCurrent: { [weak self] in
+                    self?.playerSelectionRevision == selection && self?.prefs.playerID == target.bundleID
+                })
+                if playerSelectionRevision == selection {
+                    notice = outcome(result)
+                    if result.status == .confirmed {
+                        RemoteModeHUD.shared.showPlayerMute(mutedPlayers.contains(target.bundleID), player: target.name)
+                    }
+                }
+            } else { updateNativeMuteResult(await nativeAudio.toggle()) }
         case .switchHost(let host): await performSwitch(host, displayOnly: false)
         case .switchDisplay(let host): await performSwitch(host, displayOnly: true)
         case .switchOtherHost:
@@ -1269,6 +1542,7 @@ final class ControllerModel: ObservableObject {
         }
         voiceOrigin = origin
         voiceSession = UUID()
+        prepareVoiceDestination()
         lastTranscript = ""
         isRecording = true
         notice = result
@@ -1342,6 +1616,7 @@ final class ControllerModel: ObservableObject {
     }
 
     private func finishVoice(_ origin: VoiceOrigin) {
+        if origin == .chromecast { chromecastVoice.finishCapture(); return }
         guard voiceOrigin == origin, let token = voiceSession else { return }
         voiceSilenceJob?.cancel()
         voiceSilenceJob = nil
@@ -1350,30 +1625,59 @@ final class ControllerModel: ObservableObject {
         isRecording = false
         isRecognizing = true
         notice = Outcome(.submitted, "正在关闭录音")
-        let config = prefs.whisperExecutable.isEmpty && prefs.whisperModel.isEmpty
-            ? nil
-            : WhisperConfiguration(executablePath: prefs.whisperExecutable, modelPath: prefs.whisperModel)
+        let config = whisperConfiguration
         voiceJob = Task {
             let result = await voice.finish(using: config) {
                 guard self.voiceSession == token else { return }
                 self.notice = Outcome(.submitted, "录音已停止，正在识别语音")
             }
-            guard !Task.isCancelled, voiceSession == token else { return }
-            lastTranscript = result.transcript ?? ""
-            let action: ControllerAction?
-            if let transcript = result.transcript { action = await commandAction(transcript) }
-            else { action = nil }
-            guard !Task.isCancelled, voiceSession == token else { return }
-            isRecognizing = false
-            voiceSession = nil
-            voiceJob = nil
-            if let action, let transcript = result.transcript {
-                await dispatchSpeechAction(action, transcript: transcript)
+            await completeVoiceRecognition(result, token: token)
+        }
+    }
+
+    private func completeVoiceRecognition(_ result: VoiceRecognition, token: UUID, bluetooth: Bool = false) async {
+        guard !Task.isCancelled, voiceSession == token else { return }
+        lastTranscript = result.transcript ?? ""
+        if bluetooth { chromecastVoice.recognitionCompleted(result.transcript == nil ? result.result.message : "本地语音转写完成") }
+        if voiceDestination == .focusedText {
+            let delivered: PlatformResult
+            if let text = result.transcript, let target = voiceTextTarget {
+                delivered = await target.insert(text)
             } else if result.transcript != nil {
-                notice = Outcome(.confirmed, "已完成语音转写，未匹配到可执行指令。")
-            } else {
-                notice = outcome(result.result)
-            }
+                delivered = .init(.unavailable, "已完成转写；请先把光标放进可编辑文本框。文字保留在语音页。")
+            } else { delivered = result.result }
+            guard !Task.isCancelled, voiceSession == token else { return }
+            isRecognizing = false; voiceSession = nil; voiceJob = nil; voiceTextTarget = nil
+            notice = outcome(delivered)
+            lastVoiceDelivery = "原生转文字 · " + delivered.message
+            RemoteModeHUD.shared.showVoice(title: delivered.status == .submitted ? "已发送语音文字" :
+                delivered.status == .confirmed ? "语音文字已输入" : "语音文字未输入",
+                                           detail: delivered.message)
+            return
+        }
+        let action: ControllerAction?
+        if let transcript = result.transcript { action = await commandAction(transcript) }
+        else { action = nil }
+        guard !Task.isCancelled, voiceSession == token else { return }
+        isRecognizing = false
+        voiceSession = nil
+        voiceJob = nil
+        voiceTextTarget = nil
+        if let action, let transcript = result.transcript { await dispatchSpeechAction(action, transcript: transcript) }
+        else if result.transcript != nil { notice = Outcome(.confirmed, "已完成语音转写，未匹配到可执行指令。") }
+        else { notice = outcome(result.result) }
+    }
+
+    private func prepareVoiceDestination() {
+        // Calls reaching our recorder come from a panel/shortcut or ATVV.
+        // Native T1/Xiaomi voice is left to macOS before this point.
+        voiceDestination = VoiceDestination.resolve(mode: prefs.remoteMode, hasSystemVoiceKey: false)
+        voiceTextTarget = voiceDestination == .focusedText ? NativeTextInput.capture() : nil
+        lastVoiceDelivery = voiceDestination == .focusedText ?
+            (voiceTextTarget == nil ? "原生转文字 · 尚未找到可编辑输入框" : "原生转文字 · 已锁定当前输入框，使用系统键盘事件") : "指令控制模式"
+        if voiceDestination == .focusedText {
+            RemoteModeHUD.shared.showVoice(title: "原生语音输入", detail: voiceTextTarget == nil ?
+                "未找到可编辑输入框 · 转写将保留在语音页" : "正在等待收音 · 文字将输入当前文本框")
         }
     }
 

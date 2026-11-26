@@ -32,6 +32,12 @@ public struct HIDDevice: Identifiable, Hashable, Sendable {
             usagePage == 0x01 && usage == 0x06
     }
 
+    public var isChromecastRemote: Bool {
+        vendorID == 0x18D1 && productID == 0x9450 &&
+            (transport == "Bluetooth Low Energy" || transport == "Bluetooth") &&
+            usagePage == 0x01 && usage == 0x06
+    }
+
     /// The keyboard and mouse share a USB location. Never combine collections from two receivers.
     public static func directT1LearningGroup(in devices: [Self]) -> Set<String> {
         let receivers = devices.filter(\.isDirectT1Receiver)
@@ -57,6 +63,8 @@ public enum HIDPhase: String, Sendable {
     case down, up, repeatPress
 }
 
+public enum HIDEventSource: Sendable { case hid, chromecastCompatibility }
+
 public struct HIDEvent: Sendable {
     public let device: HIDDevice
     public let control: HIDControl
@@ -64,6 +72,7 @@ public struct HIDEvent: Sendable {
     public let timestamp: TimeInterval
     public let integerValue: Int
     public let isMonitored: Bool
+    public var source: HIDEventSource = .hid
 }
 
 public struct HIDReportObservation: Sendable {
@@ -87,7 +96,7 @@ public final class HIDInput {
 
     public var isHoldingRemoteKey: Bool {
         held.contains { device, controls in
-            (device.isDirectT1Receiver || device.isXiaomiBluetoothRemote) && !controls.isEmpty
+            (device.isDirectT1Receiver || device.isXiaomiBluetoothRemote || device.isChromecastRemote) && !controls.isEmpty
         }
     }
 
@@ -118,6 +127,19 @@ public final class HIDInput {
     }
     public var onDeviceRemoved: ((HIDDevice) -> Void)?
     public var onInputReset: ((HIDDevice) -> Void)?
+    public var onCompatibilityStateChange: (() -> Void)?
+    public var onCompatibilityRoutingChange: (() -> Void)?
+    public private(set) var chromecastCompatibilityStatus = "短报文兼容未开启"
+    public var chromecastCompatibilityEnabled = false {
+        didSet { if oldValue != chromecastCompatibilityEnabled { refreshChromecastCompatibility() } }
+    }
+
+    /// Only affected, uniquely identified report-2 firmware can bypass native
+    /// isolation: these reports were rejected before reaching the OS key path.
+    public func usesChromecastCompatibility(_ device: HIDDevice, key: HIDKey) -> Bool {
+        chromecastCompatibilityEnabled && compatibilityDevice?.id == device.id && key.page == 0x0C &&
+            ChromecastInputReport.consumerUsages.contains(key.usage)
+    }
 
     private var manager: IOHIDManager?
     private var connected: [ObjectIdentifier: HIDDevice] = [:]
@@ -125,12 +147,21 @@ public final class HIDInput {
     private var workspaceObservers: [any NSObjectProtocol] = []
     private var reportTaps: [ObjectIdentifier: InputReportTap] = [:]
     private var diagnosticDigest: SHA256.Digest?
+    private let chromecastLog = ChromecastLogInput()
+    private var compatibilityDevice: HIDDevice?
+    private var bleEndpoints: [String: ChromecastLogTopology.Endpoint] = [:]
+    private var terminationObserver: (any NSObjectProtocol)?
 
-    public init() {}
+    public init() {
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.stop() } }
+    }
 
     isolated deinit {
         closeManager()
         removeWorkspaceObservers()
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     /// Shows the system prompt only when called from an explicit authorization control.
@@ -144,6 +175,7 @@ public final class HIDInput {
         }
         permission = Self.checkPermission()
         openManager()
+        refreshChromecastCompatibility()
         observeSleepAndWake()
         onStateChange?()
     }
@@ -211,6 +243,9 @@ public final class HIDInput {
     }
 
     private func closeManager() {
+        compatibilityDevice = nil
+        chromecastLog.stop()
+        bleEndpoints.removeAll()
         guard let manager else { return }
         for tap in reportTaps.values { tap.unregister() }
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
@@ -247,6 +282,7 @@ public final class HIDInput {
         resetHeldControls()
         connected.removeAll()
         openManager()
+        refreshChromecastCompatibility()
         diagnosticDeviceIDs.formIntersection(connected.values.map(\.id))
         onStateChange?()
     }
@@ -256,8 +292,17 @@ public final class HIDInput {
         guard connected[objectID] == nil else { return }
         let identity = Self.identify(device)
         connected[objectID] = identity
+        if identity.transport == "Bluetooth Low Energy" || identity.transport == "Bluetooth" {
+            let descriptor = IOHIDDeviceGetProperty(device, kIOHIDReportDescriptorKey as CFString) as? Data
+            let version = (IOHIDDeviceGetProperty(device, kIOHIDVersionNumberKey as CFString) as? NSNumber)?.intValue
+            bleEndpoints[identity.id] = ChromecastLogTopology.Endpoint(
+                id: identity.id, affectedChromecast: identity.isChromecastRemote && version == 0x011B,
+                inputReports: descriptor.flatMap(HIDReportDescriptor.inputBitCounts))
+        }
         if permission == .granted {
-            if identity.isXiaomiBluetoothRemote {
+            if identity.isChromecastRemote {
+                reportTaps[objectID] = InputReportTap(device: device, identity: identity, layout: .chromecast, input: self)
+            } else if identity.isXiaomiBluetoothRemote {
                 reportTaps[objectID] = InputReportTap(device: device, identity: identity, layout: .xiaomi, input: self)
             } else if identity.isDirectT1Receiver,
                       let descriptor = IOHIDDeviceGetProperty(device, kIOHIDReportDescriptorKey as CFString) as? Data,
@@ -266,6 +311,7 @@ public final class HIDInput {
             }
         }
         resetHeldControls(matching: identity.fingerprint)
+        refreshChromecastCompatibility()
         if notify { onStateChange?() }
     }
 
@@ -273,10 +319,66 @@ public final class HIDInput {
         let objectID = ObjectIdentifier(device)
         guard let identity = connected.removeValue(forKey: objectID) else { return }
         reportTaps.removeValue(forKey: objectID)?.unregister()
+        bleEndpoints.removeValue(forKey: identity.id)
         resetHeldControls(matching: identity.fingerprint)
         diagnosticDeviceIDs.remove(identity.id)
         onDeviceRemoved?(identity)
+        refreshChromecastCompatibility()
         onStateChange?()
+    }
+
+    private func setCompatibilityStatus(_ status: String) {
+        guard status != chromecastCompatibilityStatus else { return }
+        chromecastCompatibilityStatus = status
+        onCompatibilityStateChange?()
+    }
+
+    private func refreshChromecastCompatibility() {
+        let eligibleID = ChromecastLogTopology.eligibleDevice(in: Array(bleEndpoints.values))
+        let candidate = connected.values.first { device in
+            device.id == eligibleID && !reportTaps.values.contains {
+                $0.identity.id == device.id && $0.receivedReports.contains(2)
+            }
+        }
+        let desired = chromecastCompatibilityEnabled && permission == .granted ? candidate : nil
+        if desired?.id != compatibilityDevice?.id {
+            chromecastLog.stop()
+            if let previous = compatibilityDevice { resetHeldControls(of: previous) }
+            compatibilityDevice = desired
+            onCompatibilityRoutingChange?()
+        }
+        guard let device = desired else {
+            chromecastLog.stop()
+            if !chromecastCompatibilityEnabled { setCompatibilityStatus("短报文兼容未开启") }
+            else if permission != .granted { setCompatibilityStatus("短报文兼容等待输入监控授权") }
+            else if connected.values.contains(where: \.isChromecastRemote) {
+                let native = reportTaps.values.contains { $0.identity.isChromecastRemote && $0.receivedReports.contains(2) }
+                setCompatibilityStatus(native ? "原生 HID 已收到报告 · 无需日志兼容" :
+                    "兼容已暂停 · 需唯一的 0x011B 遥控器；其他蓝牙 HID 的短报告 2 或未知描述符会暂停兼容")
+            } else { setCompatibilityStatus("等待连接 Chromecast Remote") }
+            return
+        }
+        chromecastLog.onStatus = { [weak self] in self?.setCompatibilityStatus($0) }
+        chromecastLog.onInterrupted = { [weak self] in
+            guard let self, let current = self.compatibilityDevice else { return }
+            self.resetHeldControls(of: current)
+        }
+        chromecastLog.onReport = { [weak self] usages in
+            guard let self, self.compatibilityDevice?.id == device.id,
+                  self.permission == .granted, self.chromecastCompatibilityEnabled else { return }
+            let monitored = self.isMonitored(device)
+            guard monitored || self.diagnosticDeviceIDs.contains(device.id) else { return }
+            let previous = Set(self.held[device, default: []].filter { $0.reportID == 2 && $0.usagePage == 0x0C })
+            let current = Set(usages.map { HIDControl(usagePage: 0x0C, usage: $0, reportID: 2, elementCookie: 0) })
+            let tick = mach_absolute_time()
+            for control in previous.subtracting(current).sorted(by: { $0.usage < $1.usage }) {
+                self.sendButton(control, value: 0, on: device, ticks: tick, monitored: monitored, source: .chromecastCompatibility)
+            }
+            for control in current.subtracting(previous).sorted(by: { $0.usage < $1.usage }) {
+                self.sendButton(control, value: 1, on: device, ticks: tick, monitored: monitored, source: .chromecastCompatibility)
+            }
+        }
+        if !chromecastLog.isRunning { chromecastLog.start() }
     }
 
     private func isMonitored(_ device: HIDDevice) -> Bool {
@@ -335,7 +437,8 @@ public final class HIDInput {
         sendButton(control, value: integerValue, on: device, ticks: IOHIDValueGetTimeStamp(value), monitored: monitored)
     }
 
-    private func sendButton(_ control: HIDControl, value: Int, on device: HIDDevice, ticks: UInt64, monitored: Bool) {
+    private func sendButton(_ control: HIDControl, value: Int, on device: HIDDevice, ticks: UInt64, monitored: Bool,
+                            source: HIDEventSource = .hid) {
         var pressed = held[device, default: []]
         let phase: HIDPhase
         if value == 1 {
@@ -346,7 +449,7 @@ public final class HIDInput {
         }
         held[device] = pressed.isEmpty ? nil : pressed
         onInput?(HIDEvent(device: device, control: control, phase: phase, timestamp: Self.seconds(ticks),
-                          integerValue: value, isMonitored: monitored))
+                          integerValue: value, isMonitored: monitored, source: source))
     }
 
     private func inputReport(
@@ -361,6 +464,16 @@ public final class HIDInput {
         guard monitored || diagnosticDeviceIDs.contains(device.id) else { return }
         let layout: T1InputReport.Layout
         switch tap.layout {
+        case .chromecast:
+            guard let report = ChromecastInputReport.pressedKeys(reportID: id, bytes: Array(bytes)) else { return }
+            if id == 2, !tap.receivedReports.contains(id) {
+                // A valid native report always wins. Stop compatibility before
+                // emitting it so the same physical press cannot execute twice.
+                tap.receivedReports.insert(id)
+                refreshChromecastCompatibility()
+            }
+            sendSnapshot(report.usages, page: report.page, id: id, from: tap, ticks: ticks, monitored: monitored)
+            return
         case .xiaomi:
             guard let keys = XiaomiInputReport.pressedKeys(reportID: id, bytes: bytes) else { return }
             sendSnapshot(keys, page: 0x07, id: id, from: tap, ticks: ticks, monitored: monitored)
@@ -443,12 +556,13 @@ public final class HIDInput {
     @MainActor
     private final class InputReportTap {
         enum Layout {
-            case t1(T1InputReport.Layout), xiaomi
+            case t1(T1InputReport.Layout), xiaomi, chromecast
 
             func covers(page: UInt32, reportID: UInt32) -> Bool {
                 switch self {
                 case .t1(let layout): return layout.covers(page: page, reportID: reportID)
                 case .xiaomi: return page == 0x07 && reportID == 0x01
+                case .chromecast: return (page == 0x07 && reportID == 1) || (page == 0x0C && reportID == 2)
                 }
             }
         }

@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
+import CoreBluetooth
 import Speech
 import SwiftUI
 import T1Platform
@@ -8,6 +9,7 @@ import T1Platform
 private enum SetupPermission: String, CaseIterable, Identifiable {
     case input = "输入监控"
     case control = "辅助功能"
+    case bluetooth = "蓝牙（Chromecast 语音）"
     case microphone = "麦克风"
     case speech = "语音识别"
     case screen = "录屏与系统录音"
@@ -18,6 +20,7 @@ private enum SetupPermission: String, CaseIterable, Identifiable {
         switch self {
         case .input: "keyboard"
         case .control: "cursorarrow.click"
+        case .bluetooth: "antenna.radiowaves.left.and.right"
         case .microphone: "mic"
         case .speech: "waveform"
         case .screen: "rectangle.inset.filled"
@@ -28,6 +31,7 @@ private enum SetupPermission: String, CaseIterable, Identifiable {
         switch self {
         case .input: "Privacy_ListenEvent"
         case .control: "Privacy_Accessibility"
+        case .bluetooth: "Privacy_Bluetooth"
         case .microphone: "Privacy_Microphone"
         case .speech: "Privacy_SpeechRecognition"
         case .screen: "Privacy_ScreenCapture"
@@ -36,8 +40,9 @@ private enum SetupPermission: String, CaseIterable, Identifiable {
 
     var purpose: String {
         switch self {
-        case .input: "接收 T1 和小米遥控器的按下与松开，用于按键映射和按住说话。"
+        case .input: "接收 T1、小米和 Chromecast 普通按键的按下与松开，用于按键映射。"
         case .control: "让智能体点击播放器里的搜索框和播放按钮，也用于发送全局快捷键。"
+        case .bluetooth: "连接 Chromecast 的独立语音服务，接收语音键状态和遥控器麦克风音频。T1 用户可跳过。"
         case .microphone: "按住语音键时，使用你在语音页选定的麦克风录音。"
         case .speech: "使用 macOS 的设备端中文识别。已配置 Whisper 时可以跳过。"
         case .screen: "执行点歌时读取播放器窗口，找到搜索栏和播放控件。"
@@ -48,6 +53,7 @@ private enum SetupPermission: String, CaseIterable, Identifiable {
         switch self {
         case .input: "在「隐私与安全性 → 输入监控」开启 Orvio。如果列表没有它，用「＋」添加当前打开的应用。"
         case .control: "在「隐私与安全性」找到「辅助功能」。部分系统显示为「设备控制和数据访问」。开启当前的 Orvio。"
+        case .bluetooth: "允许 Orvio 的蓝牙请求，或在「隐私与安全性 → 蓝牙」开启；之后在按键或语音页连接遥控器语音通道。"
         case .microphone: "允许系统弹窗里的麦克风请求，或在「隐私与安全性 → 麦克风」开启 Orvio。"
         case .speech: "允许系统弹窗里的语音识别请求，或在「隐私与安全性 → 语音识别」开启 Orvio。"
         case .screen: "在「隐私与安全性 → 录屏与系统录音」开启 Orvio。按系统提示退出并重新打开后，继续检查。"
@@ -59,6 +65,7 @@ private enum SetupPermission: String, CaseIterable, Identifiable {
         switch self {
         case .input: input == .granted
         case .control: AXIsProcessTrusted() && CGPreflightPostEventAccess()
+        case .bluetooth: ChromecastVoice.bluetoothAllowed
         case .microphone: PushToTalk.microphoneAllowed
         case .speech: SFSpeechRecognizer.authorizationStatus() == .authorized
         case .screen: MusicDesktopAgent.screenCaptureAvailable()
@@ -69,6 +76,7 @@ private enum SetupPermission: String, CaseIterable, Identifiable {
         switch self {
         case .microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
         case .speech: SFSpeechRecognizer.authorizationStatus() == .notDetermined
+        case .bluetooth: CBManager.authorization == .notDetermined
         default: false
         }
     }
@@ -189,7 +197,7 @@ struct PermissionGuide: View {
             case .input: model.requestInputPermission()
             case .control: model.requestAutomationPermission()
             case .screen: model.requestMusicScreenCapture()
-            case .microphone, .speech: model.openPrivacySettings(permission.settingsAnchor)
+            case .microphone, .speech, .bluetooth: model.openPrivacySettings(permission.settingsAnchor)
             }
             check()
             return
@@ -198,6 +206,7 @@ struct PermissionGuide: View {
         Task { @MainActor in
             switch permission {
             case .microphone: _ = await PushToTalk.requestPermission()
+            case .bluetooth: model.connectChromecastVoice()
             case .speech:
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                     SFSpeechRecognizer.requestAuthorization { _ in continuation.resume() }

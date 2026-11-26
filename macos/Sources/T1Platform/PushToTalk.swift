@@ -265,6 +265,29 @@ public final class PushToTalk {
         cancel(.init(.unavailable, "本次语音已取消。"))
     }
 
+    /// Recognizes Bluetooth PCM without opening a system microphone.
+    public func recognizePCM(_ samples: [Float], sampleRate: Double, using config: WhisperConfiguration? = nil) async -> VoiceRecognition {
+        guard attempt == nil else { return .init(.unavailable, "另一段语音正在处理。") }
+        guard sampleRate == 8_000 || sampleRate == 16_000,
+              samples.count >= Int(sampleRate * 0.2), samples.count < Int(sampleRate * 15),
+              samples.allSatisfy(\.isFinite), samples.contains(where: { abs($0) >= 0.003 }),
+              let audio = Self.resample(samples, from: sampleRate) else {
+            return .init(.unavailable, "遥控器没有交付足够的有效语音，请检查蓝牙收音状态。")
+        }
+        let id = UUID()
+        attempt = id
+        defer { if attempt == id { attempt = nil; speechRecognition = nil } }
+        let result: VoiceRecognition
+        if let config { result = await WhisperRecognition.recognize(audio: Self.wavData(audio), config: config) }
+        else {
+            let recognizer = OnDeviceRecognition()
+            speechRecognition = recognizer
+            result = await recognizer.recognize(audio)
+        }
+        guard attempt == id, !Task.isCancelled else { return .init(.unavailable, "本次语音已取消。") }
+        return result
+    }
+
     private func cancel(_ result: PlatformResult) {
         guard attempt != nil else { return }
         logEnd(cancelled: true)

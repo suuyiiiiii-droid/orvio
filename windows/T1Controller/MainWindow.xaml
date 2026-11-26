@@ -290,7 +290,9 @@
                                             PreviewKeyDown="VoiceKeyDown" PreviewKeyUp="VoiceKeyUp" LostKeyboardFocus="VoiceLostFocus"/>
                                 </WrapPanel>
                                 <CheckBox x:Name="KeyboardVoice" Content="使用 Ctrl+Alt+Shift+F9 按住说话" Click="SaveGlobalHotkeys"/>
+                                <TextBlock Text="Windows 原生模式保留 T1、小米和 Google 遥控器的系统语音按键。原生模式下的电脑语音快捷键输入当前文本框，媒体／主机模式执行语音指令。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                                 <TextBlock x:Name="VoiceStatus" Text="选择系统默认输入或已验证的 T1 麦克风。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                <TextBox x:Name="VoiceTranscript" IsReadOnly="True" TextWrapping="Wrap" AutomationProperties.Name="最近语音转写"/>
                             </StackPanel>
                         </GroupBox>
                         <GroupBox Header="测试中文指令">

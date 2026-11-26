@@ -14,6 +14,7 @@ Orvio uses its own application icon and procedurally constructed remote geometry
 
 ## Dependencies
 
+- **MI-AO / 米遥**, Copyright (c) 2026 FanXeon@Poemcoder with Codex — MIT-licensed `ADPCMDecoder.swift` and `ATVVProtocol.swift`, adapted for Orvio's Chromecast voice path. Original blob IDs: `789696fa7cb6c24480a58b706a296c950fe85d56` and `b9def4056c1b19f5ded328a843820623980bbd43`. Headers are retained; the full [MIT license](licenses/mi-ao-MIT.txt) accompanies source and macOS distributions. These files retain their MIT terms. [Upstream](https://github.com/fanxeon/mi-ao).
 - **NAudio 2.2.1** — Windows audio APIs. [Source and license](https://github.com/naudio/NAudio). Restored through NuGet; dependency notices accompany its distribution.
 - **Eclipse Paho MQTT Python 2.1.0** — optional MQTT bridge. [Source and license](https://github.com/eclipse-paho/paho.mqtt.python). The macOS packaging script includes the installed package's license and metadata with the bridge.
 - **.NET test SDK, xUnit, and Visual Studio xUnit runner** — development/test dependencies declared in the test project; restored through NuGet.

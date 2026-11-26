@@ -25,7 +25,8 @@ struct DeviceStudio: View {
                     Text("设备导览")
                         .font(.system(size: 34, weight: .semibold))
                         .accessibilityAddTraits(.isHeader)
-                    Text(profile == .xiaomi ? "小米蓝牙遥控器 2 Pro · RC003" : "T1 空中飞鼠")
+                    Text(profile == .chromecast ? "Google Chromecast Voice Remote" :
+                         profile == .xiaomi ? "小米蓝牙遥控器 2 Pro · RC003" : "T1 空中飞鼠")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -39,6 +40,8 @@ struct DeviceStudio: View {
             .labelsHidden()
             .accessibilityLabel("遥控器型号")
             .frame(maxWidth: 350)
+            Text("原生导航 · 媒体控制 · 主机切换 · 按住说话，三款遥控器使用同一套功能组合。")
+                .font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 17) {
                 stage
                 VStack(spacing: 15) {
@@ -57,8 +60,8 @@ struct DeviceStudio: View {
     private var directConnected: Bool { model.devices.contains(where: \.isDirectT1Receiver) }
 
     private var connectionStatus: some View {
-        let connected = profile == .xiaomi ? !model.xiaomiDevices.isEmpty : directConnected
-        let detail = profile == .xiaomi
+        let connected = profile == .chromecast ? !model.chromecastDevices.isEmpty : profile == .xiaomi ? !model.xiaomiDevices.isEmpty : directConnected
+        let detail = profile == .chromecast ? (connected ? "Chromecast 已连接" : "Chromecast 未检测到") : profile == .xiaomi
             ? (connected ? "小米遥控器已连接" : "小米遥控器未检测到")
             : (connected ? "T1 接收器已连接" : model.deviceSummary)
         return HStack(spacing: 8) {
@@ -254,7 +257,7 @@ struct DeviceStudio: View {
                 .foregroundStyle(.secondary)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
-            if profile == .xiaomi ? selected.isXiaomiMappable : selected.candidate != nil {
+            if selected.isMappable(for: profile) {
                 Button { openMappings(profile) } label: {
                     HStack {
                         Text("配置按键")
@@ -284,8 +287,19 @@ struct DeviceStudio: View {
             Text("映射状态").font(.system(size: 13, weight: .semibold))
             Divider().opacity(0.65)
             stateLine("当前模式", value: model.remoteModeTitle, icon: "keyboard")
+            HStack(spacing: 3) {
+                ForEach(RemoteMode.allCases) { mode in
+                    Button(mode.title) { model.selectRemoteMode(mode) }
+                        .buttonStyle(.bordered)
+                        .tint(model.prefs.remoteMode == mode ? T1Design.accent : .secondary)
+                        .font(.system(size: 10, weight: .medium))
+                        .accessibilityLabel("切换到\(mode.title)模式")
+                }
+            }
             stateLine("已启用绑定", value: "\(count) 项", icon: "checkmark.circle")
             stateLine("当前播放器", value: model.currentPlayerName, icon: "play.circle")
+            Button("配置功能组合") { openMappings(profile) }
+                .buttonStyle(.bordered).frame(maxWidth: .infinity)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -306,7 +320,11 @@ struct DeviceStudio: View {
     }
 
     private var bindings: [String: KeyBinding] {
-        profile == .xiaomi ? model.prefs.xiaomiBindings : model.prefs.bindings
+        switch profile {
+        case .t1: model.prefs.bindings
+        case .xiaomi: model.prefs.xiaomiBindings
+        case .chromecast: model.prefs.chromecastBindings
+        }
     }
 
     private func mapping(for key: RemoteKey) -> (role: KeyRole, binding: KeyBinding)? {
@@ -318,7 +336,22 @@ struct DeviceStudio: View {
     }
 
     private func action(for key: RemoteKey) -> String {
-        let native = key.nativeAction(for: profile)
+        if model.prefs.remoteMode == .native && profile != .chromecast {
+            if key == .voice { return "系统语音输入" }
+            if key == .mute { return "系统静音" }
+            if mapping(for: key)?.role == .cycleMode { return "原生功能／切换模式" }
+            return key.nativeAction(for: profile)
+        }
+        if model.prefs.remoteMode == .native && profile == .chromecast && key == .voice { return "按住转文字" }
+        let button = profile == .chromecast ? ChromecastButton.all.first {
+            key.represents(KeyBinding(device: "", control: $0.id), profile: profile)
+        } : nil
+        let native = button.map { (model.prefs.chromecastBaseActions[$0.id] ?? $0.defaultAction).title }
+            ?? key.nativeAction(for: profile)
+        if profile == .chromecast, model.prefs.remoteMode != .native,
+           let mapped = mapping(for: key), mapped.binding.enabled, !model.allowsRemoteRole(mapped.role) {
+            return "本模式不执行"
+        }
         guard let mapped = mapping(for: key), mapped.binding.enabled, model.allowsRemoteRole(mapped.role) else { return native }
         if model.needsNativeIsolation(mapped.binding) { return native }
         if model.prefs.remoteMode == nil && (mapped.role == .left || mapped.role == .right) && !model.prefs.mediaMode { return native }
@@ -331,12 +364,16 @@ struct DeviceStudio: View {
         case .right: return "下一曲"
         case .volumeUp: return "提高音量"
         case .volumeDown: return "降低音量"
-        case .mute: return "切换系统静音"
+        case .mute: return "切换静音"
         case .voice: return "按住说话"
         }
     }
 
     private func status(for key: RemoteKey) -> String {
+        if model.prefs.remoteMode == .native && profile != .chromecast { return "系统原生 · 按键直通" }
+        if profile == .chromecast && key == .voice {
+            return model.chromecastVoiceReady ? "语音通道就绪" : "请连接语音通道"
+        }
         guard let mapped = mapping(for: key) else { return "原生功能" }
         if !mapped.binding.enabled { return "映射已暂停" }
         if !model.allowsRemoteRole(mapped.role) { return "当前模式未使用" }
@@ -346,7 +383,16 @@ struct DeviceStudio: View {
     }
 
     private var pressedKey: RemoteKey? {
-        guard let role = profile == .xiaomi ? model.activeXiaomiKeyRole : model.activeKeyRole else { return nil }
+        if profile == .chromecast && model.chromecastVoiceRecording { return .voice }
+        if profile == .chromecast, let control = model.activeChromecastControl {
+            return shownKeys.first { $0.represents(KeyBinding(device: "", control: control), profile: profile) }
+        }
+        let role: KeyRole? = switch profile {
+        case .t1: model.activeKeyRole
+        case .xiaomi: model.activeXiaomiKeyRole
+        case .chromecast: model.activeChromecastKeyRole
+        }
+        guard let role else { return nil }
         return shownKeys.first { mapping(for: $0)?.role == role }
     }
 
@@ -364,7 +410,7 @@ struct DeviceStudio: View {
                 switch target {
                 case .front: selected = .ok
                 case .side: selected = profile == .xiaomi ? .charge : .volumeUp
-                case .rear: selected = .typing
+                case .rear: selected = profile == .chromecast ? .batteryCover : .typing
                 }
             }
         }

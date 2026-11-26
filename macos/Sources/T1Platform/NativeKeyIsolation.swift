@@ -106,7 +106,7 @@ public final class NativeKeyIsolation {
         }
         for (id, service) in keyboards {
             let matches = requested.keys.filter { key in
-                (key.isDirectT1Receiver || key.isXiaomiBluetoothRemote) && key.locationID != 0 &&
+                (key.isDirectT1Receiver || key.isXiaomiBluetoothRemote || key.isChromecastRemote) && key.locationID != 0 &&
                     Self.integer(service, kIOHIDVendorIDKey) == key.vendorID &&
                     Self.integer(service, kIOHIDProductIDKey) == key.productID &&
                     Self.integer(service, kIOHIDPrimaryUsagePageKey) == key.usagePage &&
@@ -208,7 +208,7 @@ public final class NativeKeyIsolation {
         guard integer(service, kIOHIDPrimaryUsagePageKey) == 1,
               IOHIDServiceClientConformsTo(service, 1, 6) != 0 || IOHIDServiceClientConformsTo(service, 12, 1) != 0 else { return false }
         return (vendor == 0x1915 && product == 0x1025 && transport == "USB" && (usage == 2 || usage == 6)) ||
-            (vendor == 0x2717 && product == 0x32B8 && usage == 6 &&
+            (((vendor == 0x2717 && product == 0x32B8) || (vendor == 0x18D1 && product == 0x9450)) && usage == 6 &&
                 (transport == "Bluetooth" || transport == "Bluetooth Low Energy"))
     }
 

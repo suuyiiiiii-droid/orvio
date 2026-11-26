@@ -20,7 +20,7 @@ enum T1ControllerEntryPoint {
             }
             T1ControllerApp.main()
         } catch ControllerInstance.Failure.alreadyRunning {
-            ControllerInstance.showConflict()
+            ControllerInstance.reopenExisting()
         } catch {
             let alert = NSAlert()
             alert.messageText = "无法启动 Orvio"
@@ -32,6 +32,17 @@ enum T1ControllerEntryPoint {
 
 private enum ControllerInstance {
     enum Failure: Error { case alreadyRunning }
+
+    @MainActor
+    static func reopenExisting() {
+        guard let id = Bundle.main.bundleIdentifier else { return }
+        let existing = NSRunningApplication.runningApplications(withBundleIdentifier: id).filter {
+            $0.processIdentifier != getpid() && !$0.isTerminated
+        }
+        for app in existing { app.activate(options: [.activateAllWindows]) }
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name("local.t1controller.app.showControl"), object: id, userInfo: nil, deliverImmediately: true)
+    }
 
     static func lock() throws -> Int32 {
         let directory = Preferences.url.deletingLastPathComponent()
@@ -73,12 +84,17 @@ private enum ControllerInstance {
 }
 
 struct T1ControllerApp: App {
+    @NSApplicationDelegateAdaptor(OrvioAppDelegate.self) private var appDelegate
     @StateObject private var model = ControllerModel()
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         Window("Orvio控制台", id: "control") {
             ControlWindow(model: model)
+                .onAppear {
+                    appDelegate.reopen = { openWindow(id: "control"); NSApp.activate(ignoringOtherApps: true) }
+                    NSApp.activate(ignoringOtherApps: true)
+                }
         }
         .defaultSize(width: 1110, height: 750)
         .windowResizability(.contentMinSize)
@@ -144,6 +160,33 @@ struct T1ControllerApp: App {
         .menuBarExtraStyle(.window)
 
     }
+}
+
+@MainActor
+private final class OrvioAppDelegate: NSObject, NSApplicationDelegate {
+    var reopen: (() -> Void)?
+    private var observer: (any NSObjectProtocol)?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        observer = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("local.t1controller.app.showControl"), object: Bundle.main.bundleIdentifier, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.showControl() } }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showControl()
+        return false
+    }
+
+    private func showControl() {
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "control" || $0.title == "Orvio控制台" }) {
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else { reopen?() }
+    }
+
+    isolated deinit { if let observer { DistributedNotificationCenter.default().removeObserver(observer) } }
 }
 
 private struct ControlWindow: View {
@@ -333,6 +376,7 @@ private struct KeyPane: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if model.mappingProfile == .chromecast { chromecastCompatibilityControls }
                 HStack {
                     if model.permission != .granted {
                         Button("打开输入监控设置", action: model.requestInputPermission)
@@ -381,9 +425,13 @@ private struct KeyPane: View {
                     }
                 }
             }
-            SectionCard("模式键") { bindingRows([.cycleMode]) }
+            SectionCard("通用按键 · 三种模式均可使用") {
+                bindingRows([.cycleMode, .voice])
+                Text("原生模式：T1／小米按键直通系统，语音使用 macOS 听写。Chromecast 由兼容层提供导航、系统音频键和语音转文字。媒体／主机模式使用自定义绑定与语音指令。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             SectionCard("媒体键位预设") {
-                bindingRows(KeyRole.allCases.filter { $0 != .cycleMode && $0 != .switchHost })
+                bindingRows(KeyRole.allCases.filter { $0 != .cycleMode && $0 != .voice && $0 != .switchHost })
             }
             SectionCard("主机切换键位预设") {
                 bindingRows([.switchHost])
@@ -405,7 +453,9 @@ private struct KeyPane: View {
         .sheet(item: $learningDialogRole, onDismiss: model.cancelLearning) { role in
             VStack(alignment: .leading, spacing: 14) {
                 Text(role.title).font(.headline)
-                if model.mappingProfile == .xiaomi {
+                if model.mappingProfile == .chromecast {
+                    Text("在 Chromecast 遥控器上按一下要映射的按键并完全松开。0x011B 批次需先开启短报文兼容。")
+                } else if model.mappingProfile == .xiaomi {
                     Text("在小米蓝牙遥控器上按一下要映射的按键并松开。")
                 } else if role == .home {
                     Text("先关闭飞鼠的空鼠模式，再按一下 OK 并松开，以回车方式学习并隔离。")
@@ -424,6 +474,37 @@ private struct KeyPane: View {
             .frame(width: 415)
         }
         .onDisappear { model.endProbe() }
+    }
+
+    private var chromecastCompatibilityControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(model.chromecastDevices.isEmpty ? "Chromecast 未连接" : "Chromecast Remote 已连接 · 18D1:9450",
+                  systemImage: model.chromecastDevices.isEmpty ? "antenna.radiowaves.left.and.right.slash" : "checkmark.circle")
+            Toggle("启用 0x011B 蓝牙短报文兼容", isOn: $model.prefs.chromecastCompatibility)
+            Text(model.chromecastCompatibilityStatus).font(.caption).foregroundStyle(.secondary)
+            if !model.lastChromecastControl.isEmpty {
+                Text(model.lastChromecastControl).font(.caption.monospaced())
+            }
+            Text("仅接收两字节报告 2；其他蓝牙设备也有短报告 2 或描述符无法确定时自动暂停。日志内容不保存到应用文件。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Google Assistant 语音键和麦克风使用下方独立语音通道，无需 HID 学习。0x011B 电源键和信号源键已接入蓝牙学习，默认不执行动作，可在下方选择功能后学习。")
+                .font(.caption).foregroundStyle(.secondary)
+            ChromecastVoiceControls(model: model)
+            Button("应用 Chromecast 媒体预设", action: model.installChromecastPreset)
+                .disabled(model.chromecastDevices.count != 1)
+            DisclosureGroup("基础按键修复与自定义") {
+                Text("Chromecast 原生兼容与未占用按键可在这里自定义。原生模式的静音和音量控制系统输出；媒体模式的音乐动作跟随播放器列表。")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(ChromecastButton.all) { button in
+                    Picker(button.name, selection: Binding(
+                        get: { model.prefs.chromecastBaseActions[button.id] ?? button.defaultAction },
+                        set: { model.prefs.chromecastBaseActions[button.id] = $0 }
+                    )) {
+                        ForEach(ChromecastBaseAction.allCases) { action in Text(action.title).tag(action) }
+                    }
+                }
+            }
+        }
     }
 
     private func bindingRows(_ roles: [KeyRole]) -> some View {
@@ -446,7 +527,7 @@ private struct KeyPane: View {
                     .help("本组合会隔离已启用按键的原生功能")
                     Button("移除") { model.editedBindings.removeValue(forKey: role.rawValue) }
                 }
-                Button(role == .home ? "换成 OK／学习" : "学习") {
+                Button(model.mappingProfile == .chromecast && role == .voice ? "连接语音通道" : role == .home ? "换成 OK／学习" : "学习") {
                     if model.learn(role) { learningDialogRole = role }
                 }
                 .accessibilityLabel("学习\(role.title)")
@@ -512,6 +593,14 @@ private struct MusicPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             SectionCard("播放器列表") {
+                if model.nativeSoftwareMuted {
+                    Label("系统软件静音已开启", systemImage: "speaker.slash.fill")
+                    Button("取消系统软件静音", action: model.releaseNativeSoftwareMute)
+                }
+                if model.mutedPlayers.contains(model.prefs.playerID) {
+                    Label("所选播放器已静音", systemImage: "speaker.slash.fill")
+                    Button("取消播放器静音") { model.submit(.toggleMute) }
+                }
                 if model.prefs.players.isEmpty {
                     Text("添加已安装的音乐应用").foregroundStyle(.secondary)
                 }
@@ -655,6 +744,32 @@ private struct HostPane: View {
     ]
 }
 
+private struct ChromecastVoiceControls: View {
+    @ObservedObject var model: ControllerModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(model.chromecastVoiceStatus, systemImage: model.chromecastVoiceReady ? "mic.badge.plus" : "mic.slash")
+                .font(.callout)
+                .foregroundStyle(model.chromecastVoiceReady ? Color.green : Color.secondary)
+            HStack {
+                Button(model.prefs.chromecastVoiceEnabled ? "重新连接语音通道" : "连接遥控器语音", action: model.connectChromecastVoice)
+                if model.prefs.chromecastVoiceEnabled {
+                    Button("断开语音") { model.prefs.chromecastVoiceEnabled = false }
+                }
+                if !ChromecastVoice.bluetoothAllowed {
+                    Button("打开蓝牙授权设置") { model.openPrivacySettings("Privacy_Bluetooth") }
+                }
+            }
+            if model.chromecastVoicePackets > 0 {
+                Text("本段收到 \(model.chromecastVoicePackets) 个音频包").font(.caption.monospaced())
+            }
+            Text("先显示「语音已就绪」，再按住遥控器语音键；等「收音已就绪」后说话，松开结束并转写。连接失败、无音频和超时都会明确提示。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+}
+
 private struct VoicePane: View {
     @ObservedObject var model: ControllerModel
     @State private var command = ""
@@ -679,6 +794,10 @@ private struct VoicePane: View {
                     }
                 }
                 Toggle("使用电脑快捷键 ⌃⌥⇧F9 按住说话", isOn: $model.prefs.voiceHotkeyEnabled)
+                Text(model.prefs.remoteMode == .native
+                     ? "原生模式：T1／小米语音键交给 macOS 听写；Chromecast 与电脑语音快捷键把转写文字输入按键时聚焦的文本框。"
+                     : "当前组合使用语音指令控制电脑和所选播放器。")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     HoldToTalkButton(model: model)
                     if model.isRecording {
@@ -697,7 +816,12 @@ private struct VoicePane: View {
                 if !model.lastTranscript.isEmpty {
                     Text("识别结果  \(model.lastTranscript)").textSelection(.enabled)
                 }
+                if !model.lastVoiceDelivery.isEmpty {
+                    Text("输入结果  \(model.lastVoiceDelivery)").font(.caption).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             }
+            SectionCard("Chromecast 遥控器语音") { ChromecastVoiceControls(model: model) }
             XiaoAIPane(model: model)
             SectionCard("离线识别") {
                 TextField("whisper-cli 可执行文件路径", text: $model.prefs.whisperExecutable)

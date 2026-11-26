@@ -23,6 +23,7 @@
                 <StackPanel Orientation="Horizontal">
                     <Button x:Name="T1Profile" Content="T1 飞鼠" Tag="0" Click="SelectProfile" Margin="0,0,2,0" MinWidth="130"/>
                     <Button x:Name="XiaomiProfile" Content="小米蓝牙遥控器" Tag="1" Click="SelectProfile" Margin="0" MinWidth="158"/>
+                    <Button x:Name="ChromecastProfile" Content="Chromecast" Tag="2" Click="SelectProfile" Margin="2,0,0,0" MinWidth="130"/>
                 </StackPanel>
             </Border>
             <Grid>

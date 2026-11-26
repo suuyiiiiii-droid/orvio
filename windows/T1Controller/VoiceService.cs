@@ -43,6 +43,7 @@ internal sealed class VoiceService(Settings settings) : IDisposable
     private Recording? current;
     public event Action<string>? Status;
     public event Action<string>? Transcribed;
+    public event Action? Starting;
 
     public Recognizer? FindRecognizer()
     {
@@ -103,6 +104,7 @@ internal sealed class VoiceService(Settings settings) : IDisposable
         }
 
         Recording? recording = null;
+        Starting?.Invoke();
         MMDevice? endpoint = null;
         try
         {

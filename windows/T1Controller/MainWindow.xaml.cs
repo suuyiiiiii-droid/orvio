@@ -38,6 +38,10 @@ public partial class MainWindow : Window
     private sealed record BindingChoice(ButtonBinding Binding, string Name);
     private sealed record MarkerChoice(string? Path, string Name);
     private sealed record Learning(string Path, ButtonRole Role, string? Pressed = null);
+    private NativeTextTarget? speechTextTarget;
+    private bool speechIsDictation;
+    private long voiceDeliveryRevision;
+    private long speechRevisionAtStart;
 
     private static readonly RoleChoice[] Roles =
     [
@@ -49,12 +53,13 @@ public partial class MainWindow : Window
         new(ButtonRole.VolumeUp, "媒体 · 音量加"),
         new(ButtonRole.VolumeDown, "媒体 · 音量减"),
         new(ButtonRole.Mute, "媒体 · 静音 / 取消静音"),
-        new(ButtonRole.Voice, "媒体 · 按住说话"),
+        new(ButtonRole.Voice, "通用 · 按住说话"),
         new(ButtonRole.SwitchHost, "主机切换 · 切到另一台")
     ];
 
     private readonly Settings settings;
     private readonly Gestures gestures = new();
+    private readonly RemoteModeHUD modeHud = new();
     private readonly DisplayService displays = new();
     private readonly MediaService media;
     private readonly SwitchCoordinator switcher;
@@ -92,10 +97,17 @@ public partial class MainWindow : Window
         voice = new VoiceService(settings);
         voiceKeyRelease.Tick += FollowVoiceHotkey;
         voice.Status += message => VoiceStatus.Text = message;
+        voice.Starting += () =>
+        {
+            speechIsDictation = RemoteModes.VoiceDestination(settings.RemoteMode, false) == VoiceInputDestination.Text;
+            speechRevisionAtStart = voiceDeliveryRevision;
+            speechTextTarget = speechIsDictation ? NativeTextTarget.Capture() : null;
+        };
         voice.Transcribed += text =>
         {
-            TextCommand.Text = text;
-            _ = ExecuteText(text);
+            VoiceTranscript.Text = text;
+            if (!speechIsDictation) TextCommand.Text = text;
+            _ = DeliverVoiceText(text, speechIsDictation, speechTextTarget, speechRevisionAtStart);
         };
 
         InitializeComponent();
@@ -247,6 +259,7 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs args)
     {
+        modeHud.Close();
         SystemEvents.PowerModeChanged -= PowerModeChanged;
         voiceKeyRelease.Stop();
         voice.Dispose();
@@ -283,7 +296,8 @@ public partial class MainWindow : Window
     {
         updatingDevices = true;
         var devices = raw?.Devices ?? [];
-        DeviceOverview.UpdateConnections(devices.Any(device => device.IsT1), devices.Any(device => device.IsXiaomiRemote));
+        DeviceOverview.UpdateConnections(devices.Any(device => device.IsT1), devices.Any(device => device.IsXiaomiRemote),
+            devices.Any(device => device.IsChromecastRemote));
         DeviceBox.ItemsSource = devices;
         DeviceBox.SelectedItem = devices.FirstOrDefault(device =>
             string.Equals(device.Path, selectedDevice, StringComparison.OrdinalIgnoreCase));
@@ -301,7 +315,7 @@ public partial class MainWindow : Window
     private void ConfigureGuideDevice(GuideDevice profile)
     {
         MainTabs.SelectedItem = RemoteTab;
-        var options = (raw?.Devices ?? []).Where(device => profile == GuideDevice.Xiaomi ? device.IsXiaomiRemote : device.IsT1)
+        var options = (raw?.Devices ?? []).Where(device => profile == GuideDevice.Chromecast ? device.IsChromecastRemote : profile == GuideDevice.Xiaomi ? device.IsXiaomiRemote : device.IsT1)
             .ToArray();
         if (options.Length == 1) DeviceBox.SelectedItem = options[0];
         else if (options.Length > 1) DeviceBox.Focus();
@@ -510,6 +524,9 @@ public partial class MainWindow : Window
             string.Equals(item.DevicePath, button.Device.Path, StringComparison.OrdinalIgnoreCase) && item.Control == button.Control);
         if (binding is null)
             return;
+        if (settings.RemoteMode == RemoteMode.Native && binding.Role == ButtonRole.Voice &&
+            (button.Device.IsT1 || button.Device.IsXiaomiRemote || button.Device.IsChromecastRemote))
+            return; // Keep the hardware voice key's system behavior in native mode.
         if (RemoteModes.RequiresNativeIsolation(settings.RemoteMode, binding.Role))
         {
             if (!button.Down)
@@ -603,12 +620,15 @@ public partial class MainWindow : Window
     {
         if (settings.RemoteMode == mode) return;
         settings.RemoteMode = mode;
+        voiceDeliveryRevision++;
+        speechTextTarget = null;
         gestures.Reset();
-        if (voice.Owner is { } owner && owner.Contains('|'))
+        if (voice.Owner is { } owner)
             _ = voice.Finish(owner, cancel: true);
         RefreshModeChoices();
         RefreshBindings();
         UpdateOverview();
+        modeHud.ShowMode(mode, settings.Players.FirstOrDefault(item => item.Id == settings.CurrentPlayer)?.Name ?? "未选播放器");
         if (Persist()) ActionStatus.Text = $"遥控器已切到「{RemoteModes.Title(mode)}」模式。";
     }
 
@@ -1272,6 +1292,15 @@ public partial class MainWindow : Window
     }
 
     private void RunTextCommand(object sender, RoutedEventArgs args) => _ = ExecuteText(TextCommand.Text);
+
+    private async Task DeliverVoiceText(string text, bool dictation, NativeTextTarget? target, long revision)
+    {
+        if (revision != voiceDeliveryRevision) return;
+        if (!dictation) { await ExecuteText(text); return; }
+        var result = target is null ? ActionResult.Unavailable("已转写；请先把光标放进可编辑文本框，文字保留在语音页。") :
+            await target.Insert(text, () => revision == voiceDeliveryRevision && settings.RemoteMode == RemoteMode.Native);
+        if (revision == voiceDeliveryRevision) { VoiceStatus.Text = result.Message; ActionStatus.Text = result.Message; }
+    }
 
     private async Task ExecuteText(string text)
     {
